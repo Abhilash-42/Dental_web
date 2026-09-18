@@ -1,16 +1,12 @@
-// ==================================================
-// DR. CHANDU'S MULTI-SPECIALITY DENTAL HOSPITAL
-// BACKEND API
-// ==================================================
+// Dr. Chandu's Dental Hospital — backend API
 //
 // Public endpoints:
-//   GET    /
-//   GET    /api/doctors
-//   GET    /api/services
-//   GET    /api/availability
 //   POST   /api/appointments
 //   GET    /api/appointments/status
 //   POST   /api/rag-chat
+//   GET    /api/doctors
+//   GET    /api/services
+//   GET    /api/availability
 //
 // Admin endpoints:
 //   GET    /api/appointments
@@ -19,26 +15,17 @@
 // Environment variables:
 //   DATABASE_URL
 //   ADMIN_KEY
-//   GEMINI_API_KEY
+//   GROQ_API_KEY
 //   ALLOWED_ORIGIN
-//   OPEN_TIME
-//   CLOSE_TIME
-//
-// Default hospital booking hours:
-//   10:00 AM - 7:30 PM
-//
-// ==================================================
+//   OPEN_TIME       optional, default 10:00
+//   CLOSE_TIME      optional, default 19:30
 
 import express from "express";
 import cors from "cors";
 import { Pool } from "pg";
-import { GoogleGenAI } from "@google/genai";
+import Groq from "groq-sdk";
 
 const app = express();
-
-// ==================================================
-// MIDDLEWARE
-// ==================================================
 
 app.use(express.json());
 
@@ -54,294 +41,55 @@ app.use(
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: {
-    rejectUnauthorized: false,
-  },
+  ssl: { rejectUnauthorized: false },
 });
 
-// ==================================================
-// HOSPITAL CONFIGURATION
-// ==================================================
-
-const OPEN_TIME =
-  process.env.OPEN_TIME || "10:00";
-
-const CLOSE_TIME =
-  process.env.CLOSE_TIME || "19:30";
-
-const SLOT_DURATION_MINUTES = 30;
-
-// ==================================================
-// DOCTORS
-// ==================================================
-//
-// These are currently demo doctor profiles.
-// Replace names/details/images with actual hospital
-// information when available.
-//
-// workingDays:
-//   0 = Sunday
-//   1 = Monday
-//   2 = Tuesday
-//   3 = Wednesday
-//   4 = Thursday
-//   5 = Friday
-//   6 = Saturday
-//
-// ==================================================
-
-const DOCTORS = [
-  {
-    name: "Dr. Chandu Reddy",
-    role: "Chief Dental Surgeon",
-    qualification: "BDS",
-    specialization:
-      "General Dentistry & Oral Care",
-    experience: "10+ Years",
-    image:
-      "https://placehold.co/600x600?text=Dr.+Chandu",
-    demo: true,
-
-    startTime: "10:00",
-    endTime: "19:30",
-
-    workingDays: [
-      0,
-      1,
-      2,
-      3,
-      4,
-      5,
-      6,
-    ],
-  },
-
-  {
-    name: "Dr. Priya Sharma",
-    role: "Orthodontist",
-    qualification:
-      "BDS, MDS Orthodontics",
-    specialization:
-      "Braces & Clear Aligners",
-    experience: "8+ Years",
-    image:
-      "https://placehold.co/600x600?text=Dr.+Priya",
-    demo: true,
-
-    startTime: "10:00",
-    endTime: "19:30",
-
-    workingDays: [
-      0,
-      1,
-      2,
-      3,
-      4,
-      5,
-      6,
-    ],
-  },
-
-  {
-    name: "Dr. Arjun Mehta",
-    role: "Endodontist",
-    qualification:
-      "BDS, MDS Endodontics",
-    specialization:
-      "Root Canal Treatment",
-    experience: "9+ Years",
-    image:
-      "https://placehold.co/600x600?text=Dr.+Arjun",
-    demo: true,
-
-    startTime: "10:00",
-    endTime: "19:30",
-
-    workingDays: [
-      0,
-      1,
-      2,
-      3,
-      4,
-      5,
-      6,
-    ],
-  },
-
-  {
-    name: "Dr. Sneha Iyer",
-    role: "Periodontist",
-    qualification:
-      "BDS, MDS Periodontics",
-    specialization:
-      "Gum Care & Dental Implants",
-    experience: "7+ Years",
-    image:
-      "https://placehold.co/600x600?text=Dr.+Sneha",
-    demo: true,
-
-    startTime: "10:00",
-    endTime: "19:30",
-
-    workingDays: [
-      0,
-      1,
-      2,
-      3,
-      4,
-      5,
-      6,
-    ],
-  },
-];
-
-// ==================================================
-// SERVICES
-// ==================================================
-
-const SERVICES = [
-  {
-    name: "General Dentistry",
-    description:
-      "Routine dental examinations and general oral care.",
-  },
-
-  {
-    name: "Teeth Cleaning",
-    description:
-      "Professional scaling and polishing for plaque and tartar removal.",
-  },
-
-  {
-    name: "Root Canals",
-    description:
-      "Root canal treatment for infected or damaged teeth.",
-  },
-
-  {
-    name: "Dental Implants",
-    description:
-      "Dental implant solutions for missing teeth.",
-  },
-
-  {
-    name: "Braces",
-    description:
-      "Orthodontic treatment including braces and clear aligners.",
-  },
-
-  {
-    name: "Teeth Whitening",
-    description:
-      "Professional teeth whitening treatment.",
-  },
-
-  {
-    name: "Extractions",
-    description:
-      "Tooth extraction and related dental care.",
-  },
-
-  {
-    name: "Paediatrics",
-    description:
-      "Dental care for children.",
-  },
-
-  {
-    name: "X-ray",
-    description:
-      "Dental imaging and diagnostic X-rays.",
-  },
-
-  {
-    name: "Veneers & Crowns",
-    description:
-      "Restorative and cosmetic dental solutions.",
-  },
-
-  {
-    name: "Dentures & Bridges",
-    description:
-      "Tooth replacement using dentures and bridges.",
-  },
-];
-
-// ==================================================
-// DATABASE INITIALIZATION
-// ==================================================
-
 async function initDb() {
-  // ----------------------------------------------
-  // Create appointments table
-  // ----------------------------------------------
-
   await pool.query(`
     CREATE TABLE IF NOT EXISTS appointments (
       id SERIAL PRIMARY KEY,
-
       name TEXT NOT NULL,
-
       phone TEXT NOT NULL,
-
       email TEXT,
-
       service TEXT NOT NULL,
-
       doctor TEXT,
-
       appt_date DATE NOT NULL,
-
       appt_time TEXT NOT NULL,
-
       notes TEXT,
-
       status TEXT NOT NULL DEFAULT 'pending',
-
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
   `);
 
-  // ----------------------------------------------
-  // Migration for existing databases
-  // ----------------------------------------------
-
+  // Safe migration for older databases
   await pool.query(`
     ALTER TABLE appointments
     ADD COLUMN IF NOT EXISTS doctor TEXT;
   `);
 
-  // ----------------------------------------------
-  // Prevent double booking
-  //
-  // Only pending and confirmed appointments
-  // occupy a slot.
-  //
-  // declined/completed appointments do not block it.
-  // ----------------------------------------------
-
+  // Prevent two active appointments from using
+  // the same doctor/date/time slot.
   await pool.query(`
-    CREATE UNIQUE INDEX IF NOT EXISTS
-    unique_active_doctor_slot
-
-    ON appointments (
-      doctor,
-      appt_date,
-      appt_time
-    )
-
+    CREATE UNIQUE INDEX IF NOT EXISTS unique_active_doctor_slot
+    ON appointments (doctor, appt_date, appt_time)
     WHERE status IN ('pending', 'confirmed')
       AND doctor IS NOT NULL;
   `);
 }
 
 // ==================================================
-// GEMINI
+// GROQ AI
 // ==================================================
 
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY,
+const groq = new Groq({
+  apiKey: process.env.GROQ_API_KEY,
 });
+
+if (!process.env.GROQ_API_KEY) {
+  console.warn(
+    "WARNING: GROQ_API_KEY is not configured."
+  );
+}
 
 // ==================================================
 // GENERAL HELPERS
@@ -355,39 +103,20 @@ function normalizeText(text) {
     .trim();
 }
 
-// --------------------------------------------------
-// Get today's date in India
-// --------------------------------------------------
-
 function getTodayIndia() {
-  return new Intl.DateTimeFormat(
-    "en-CA",
-    {
-      timeZone: "Asia/Kolkata",
-    }
-  ).format(new Date());
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata",
+  }).format(new Date());
 }
-
-// --------------------------------------------------
-// Validate HH:MM
-// --------------------------------------------------
 
 function isValidTimeFormat(time) {
-  return /^\d{2}:\d{2}$/.test(
-    String(time || "")
-  );
+  return /^\d{2}:\d{2}$/.test(time);
 }
 
-// --------------------------------------------------
-// Convert HH:MM to minutes
-// --------------------------------------------------
-
 function timeToMinutes(time) {
-  if (!isValidTimeFormat(time)) {
-    return null;
-  }
+  if (!isValidTimeFormat(time)) return null;
 
-  const [hours, minutes] = String(time)
+  const [hours, minutes] = time
     .split(":")
     .map(Number);
 
@@ -403,25 +132,19 @@ function timeToMinutes(time) {
   return hours * 60 + minutes;
 }
 
-// --------------------------------------------------
-// Get doctor
-// --------------------------------------------------
+const OPEN_TIME =
+  process.env.OPEN_TIME || "10:00";
+
+const CLOSE_TIME =
+  process.env.CLOSE_TIME || "19:30";
+
+const SLOT_DURATION_MINUTES = 30;
 
 function getDoctorByName(name) {
   return DOCTORS.find(
-    (doctor) =>
-      doctor.name === String(name || "").trim()
+    (doctor) => doctor.name === name
   );
 }
-
-// --------------------------------------------------
-// Get weekday in India
-//
-// 0 = Sunday
-// 1 = Monday
-// ...
-// 6 = Saturday
-// --------------------------------------------------
 
 function getIndiaWeekday(dateString) {
   const date = new Date(
@@ -432,11 +155,17 @@ function getIndiaWeekday(dateString) {
     return null;
   }
 
-  const weekday =
-    new Intl.DateTimeFormat("en-US", {
+  const weekday = new Intl.DateTimeFormat(
+    "en-US",
+    {
       timeZone: "Asia/Kolkata",
       weekday: "short",
-    }).format(date);
+    }
+  )
+    .formatToParts(date)
+    .find(
+      (part) => part.type === "weekday"
+    )?.value;
 
   const map = {
     Sun: 0,
@@ -451,19 +180,9 @@ function getIndiaWeekday(dateString) {
   return map[weekday] ?? null;
 }
 
-// --------------------------------------------------
-// Generate 30-minute slots
-// --------------------------------------------------
-
-function buildTimeSlots(
-  startTime,
-  endTime
-) {
-  const start =
-    timeToMinutes(startTime);
-
-  const end =
-    timeToMinutes(endTime);
+function buildTimeSlots(startTime, endTime) {
+  const start = timeToMinutes(startTime);
+  const end = timeToMinutes(endTime);
 
   if (
     start === null ||
@@ -475,16 +194,17 @@ function buildTimeSlots(
 
   const slots = [];
 
+  // Appointment duration = 30 minutes.
+  // Therefore the final start time must allow
+  // the appointment to finish before closing.
+
   for (
     let minutes = start;
     minutes + SLOT_DURATION_MINUTES <= end;
     minutes += SLOT_DURATION_MINUTES
   ) {
-    const hours =
-      Math.floor(minutes / 60);
-
-    const mins =
-      minutes % 60;
+    const hours = Math.floor(minutes / 60);
+    const mins = minutes % 60;
 
     slots.push(
       `${String(hours).padStart(2, "0")}:${String(
@@ -495,10 +215,6 @@ function buildTimeSlots(
 
   return slots;
 }
-
-// --------------------------------------------------
-// Check doctor schedule
-// --------------------------------------------------
 
 function isSlotInDoctorSchedule(
   doctor,
@@ -512,14 +228,10 @@ function isSlotInDoctorSchedule(
     timeToMinutes(time);
 
   const start =
-    timeToMinutes(
-      doctor.startTime
-    );
+    timeToMinutes(doctor.startTime);
 
   const end =
-    timeToMinutes(
-      doctor.endTime
-    );
+    timeToMinutes(doctor.endTime);
 
   if (
     weekday === null ||
@@ -531,33 +243,10 @@ function isSlotInDoctorSchedule(
   }
 
   return (
-    doctor.workingDays.includes(
-      weekday
-    ) &&
+    doctor.workingDays.includes(weekday) &&
     requested >= start &&
     requested + SLOT_DURATION_MINUTES <=
       end
-  );
-}
-
-// --------------------------------------------------
-// Get current India time in minutes
-// --------------------------------------------------
-
-function getCurrentIndiaMinutes() {
-  const indiaTime =
-    new Intl.DateTimeFormat(
-      "en-GB",
-      {
-        timeZone: "Asia/Kolkata",
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: false,
-      }
-    ).format(new Date());
-
-  return timeToMinutes(
-    indiaTime
   );
 }
 
@@ -565,13 +254,8 @@ function getCurrentIndiaMinutes() {
 // ADMIN AUTH
 // ==================================================
 
-function requireAdmin(
-  req,
-  res,
-  next
-) {
-  const key =
-    req.header("x-admin-key");
+function requireAdmin(req, res, next) {
+  const key = req.header("x-admin-key");
 
   if (
     !key ||
@@ -592,52 +276,45 @@ function requireAdmin(
 app.get("/", (_req, res) => {
   res.json({
     ok: true,
-
     service:
       "Dr. Chandu's Dental Hospital API",
-
-    message:
-      "Backend is running",
-
-    bookingHours:
-      `${OPEN_TIME} - ${CLOSE_TIME}`,
-
-    slotDuration:
-      SLOT_DURATION_MINUTES,
-
-    doctors:
-      DOCTORS.length,
-
-    services:
-      SERVICES.length,
+    message: "Backend is running",
   });
 });
 
 // ==================================================
-// DOCTORS API
+// PUBLIC CATALOG
 // ==================================================
 
-app.get(
-  "/api/doctors",
-  (_req, res) => {
-    res.json({
-      doctors: DOCTORS,
-    });
-  }
-);
+app.get("/api/doctors", (_req, res) => {
+  res.json({
+    doctors: DOCTORS,
+  });
+});
 
-// ==================================================
-// SERVICES API
-// ==================================================
-
-app.get(
-  "/api/services",
-  (_req, res) => {
-    res.json({
-      services: SERVICES,
-    });
-  }
-);
+app.get("/api/services", (_req, res) => {
+  res.json({
+    services: [
+      "Check-ups",
+      "Teeth Cleaning",
+      "Fillings & Sealants",
+      "Emergency Care",
+      "Paediatrics",
+      "Teeth Whitening",
+      "Veneers & Crowns",
+      "Bonding",
+      "Teeth Reshaping",
+      "Laser Dentistry",
+      "Dental Implants",
+      "Root Canals",
+      "Extractions",
+      "Oral Surgery",
+      "Dentures & Bridges",
+      "Mouth Guards",
+      "X-ray",
+    ],
+  });
+});
 
 // ==================================================
 // REAL-TIME AVAILABILITY
@@ -646,38 +323,23 @@ app.get(
 app.get(
   "/api/availability",
   async (req, res) => {
-    const doctorName =
-      String(
-        req.query.doctor || ""
-      ).trim();
+    const doctorName = String(
+      req.query.doctor || ""
+    ).trim();
 
-    const date =
-      String(
-        req.query.date || ""
-      ).trim();
+    const date = String(
+      req.query.date || ""
+    ).trim();
 
-    // ----------------------------------------------
-    // Validate inputs
-    // ----------------------------------------------
-
-    if (
-      !doctorName ||
-      !date
-    ) {
+    if (!doctorName || !date) {
       return res.status(400).json({
         error:
           "doctor and date are required.",
       });
     }
 
-    // ----------------------------------------------
-    // Validate doctor
-    // ----------------------------------------------
-
     const doctor =
-      getDoctorByName(
-        doctorName
-      );
+      getDoctorByName(doctorName);
 
     if (!doctor) {
       return res.status(400).json({
@@ -686,14 +348,8 @@ app.get(
       });
     }
 
-    // ----------------------------------------------
-    // Validate date
-    // ----------------------------------------------
-
     if (
-      !/^\d{4}-\d{2}-\d{2}$/.test(
-        date
-      )
+      !/^\d{4}-\d{2}-\d{2}$/.test(date)
     ) {
       return res.status(400).json({
         error:
@@ -701,34 +357,19 @@ app.get(
       });
     }
 
-    const today =
-      getTodayIndia();
-
-    // ----------------------------------------------
-    // Past date
-    // ----------------------------------------------
+    const today = getTodayIndia();
 
     if (date < today) {
       return res.json({
-        doctor:
-          doctor.name,
-
+        doctor: doctor.name,
         date,
-
         working: false,
-
         slots: [],
-
         availableSlots: [],
-
         message:
           "Past dates are not available for booking.",
       });
     }
-
-    // ----------------------------------------------
-    // Check doctor working day
-    // ----------------------------------------------
 
     const weekday =
       getIndiaWeekday(date);
@@ -739,25 +380,15 @@ app.get(
       )
     ) {
       return res.json({
-        doctor:
-          doctor.name,
-
+        doctor: doctor.name,
         date,
-
         working: false,
-
         slots: [],
-
         availableSlots: [],
-
         message:
           `${doctor.name} is not scheduled to work on this date.`,
       });
     }
-
-    // ----------------------------------------------
-    // Generate slots
-    // ----------------------------------------------
 
     const allSlots =
       buildTimeSlots(
@@ -766,25 +397,14 @@ app.get(
       );
 
     try {
-      // --------------------------------------------
-      // Get booked slots
-      // --------------------------------------------
-
       const result =
         await pool.query(
           `
           SELECT appt_time
-
           FROM appointments
-
           WHERE doctor = $1
-
             AND appt_date = $2
-
-            AND status IN (
-              'pending',
-              'confirmed'
-            )
+            AND status IN ('pending', 'confirmed')
           `,
           [
             doctor.name,
@@ -792,84 +412,68 @@ app.get(
           ]
         );
 
-      const booked =
-        new Set(
-          result.rows.map(
-            (row) =>
-              row.appt_time
-          )
-        );
+      const booked = new Set(
+        result.rows.map(
+          (row) => row.appt_time
+        )
+      );
 
-      // --------------------------------------------
-      // Current time for today
-      // --------------------------------------------
-
-      let currentMinutes =
-        null;
+      let currentMinutes = null;
 
       if (date === today) {
+        const indiaTime =
+          new Intl.DateTimeFormat(
+            "en-GB",
+            {
+              timeZone:
+                "Asia/Kolkata",
+              hour: "2-digit",
+              minute: "2-digit",
+              hour12: false,
+            }
+          ).format(new Date());
+
         currentMinutes =
-          getCurrentIndiaMinutes();
+          timeToMinutes(
+            indiaTime
+          );
       }
 
-      // --------------------------------------------
-      // Build availability
-      // --------------------------------------------
-
       const slots =
-        allSlots.map(
-          (time) => {
-            const minutes =
-              timeToMinutes(
-                time
-              );
+        allSlots.map((time) => {
+          const minutes =
+            timeToMinutes(time);
 
-            const past =
-              currentMinutes !==
-                null &&
-              minutes !== null &&
-              minutes <=
-                currentMinutes;
+          const past =
+            currentMinutes !== null &&
+            minutes !== null &&
+            minutes <= currentMinutes;
 
-            const bookedSlot =
-              booked.has(time);
+          const bookedSlot =
+            booked.has(time);
 
-            return {
-              time,
-
-              available:
-                !past &&
-                !bookedSlot,
-
-              reason:
-                bookedSlot
-                  ? "booked"
-                  : past
-                  ? "past"
-                  : null,
-            };
-          }
-        );
-
-      // --------------------------------------------
-      // Response
-      // --------------------------------------------
+          return {
+            time,
+            available:
+              !past && !bookedSlot,
+            reason: bookedSlot
+              ? "booked"
+              : past
+              ? "past"
+              : null,
+          };
+        });
 
       res.json({
-        doctor:
-          doctor.name,
-
+        doctor: doctor.name,
         date,
-
         working: true,
 
         schedule: {
           startTime:
             doctor.startTime,
-
           endTime:
             doctor.endTime,
-
           slotDurationMinutes:
             SLOT_DURATION_MINUTES,
         },
@@ -920,7 +524,7 @@ app.post(
     } = req.body || {};
 
     // ----------------------------------------------
-    // Required fields
+    // REQUIRED FIELDS
     // ----------------------------------------------
 
     if (
@@ -938,7 +542,7 @@ app.post(
     }
 
     // ----------------------------------------------
-    // Doctor validation
+    // DOCTOR
     // ----------------------------------------------
 
     const selectedDoctor =
@@ -954,7 +558,7 @@ app.post(
     }
 
     // ----------------------------------------------
-    // Phone validation
+    // PHONE
     // ----------------------------------------------
 
     const cleanPhone =
@@ -975,7 +579,7 @@ app.post(
     }
 
     // ----------------------------------------------
-    // Date validation
+    // DATE
     // ----------------------------------------------
 
     const today =
@@ -1000,16 +604,11 @@ app.post(
     }
 
     // ----------------------------------------------
-    // Time validation
+    // TIME
     // ----------------------------------------------
 
     const requestedMinutes =
       timeToMinutes(time);
-
-    const openMinutes =
-      timeToMinutes(
-        OPEN_TIME
-      );
 
     const closeMinutes =
       timeToMinutes(
@@ -1017,9 +616,7 @@ app.post(
       );
 
     if (
-      requestedMinutes ===
-        null ||
-      openMinutes === null ||
+      requestedMinutes === null ||
       closeMinutes === null
     ) {
       return res.status(400).json({
@@ -1027,42 +624,6 @@ app.post(
           "Invalid appointment time.",
       });
     }
-
-    // ----------------------------------------------
-    // Hospital hours
-    // ----------------------------------------------
-
-    if (
-      requestedMinutes <
-        openMinutes ||
-      requestedMinutes +
-          SLOT_DURATION_MINUTES >
-        closeMinutes
-    ) {
-      return res.status(400).json({
-        error:
-          `Appointments are available between ${OPEN_TIME} and ${CLOSE_TIME}, with 30-minute slots.`,
-      });
-    }
-
-    // ----------------------------------------------
-    // 30-minute slot validation
-    // ----------------------------------------------
-
-    if (
-      requestedMinutes %
-        SLOT_DURATION_MINUTES !==
-      0
-    ) {
-      return res.status(400).json({
-        error:
-          "Please select a valid 30-minute appointment slot.",
-      });
-    }
-
-    // ----------------------------------------------
-    // Doctor schedule validation
-    // ----------------------------------------------
 
     if (
       !isSlotInDoctorSchedule(
@@ -1073,21 +634,34 @@ app.post(
     ) {
       return res.status(400).json({
         error:
-          `${selectedDoctor.name} is not available at that time.`,
+          `Appointments for ${selectedDoctor.name} are available in 30-minute slots between ${selectedDoctor.startTime} and ${selectedDoctor.endTime}.`,
       });
     }
 
     // ----------------------------------------------
-    // Same-day past-time validation
+    // TODAY'S PAST TIME
     // ----------------------------------------------
 
     if (date === today) {
+      const indiaTime =
+        new Intl.DateTimeFormat(
+          "en-GB",
+          {
+            timeZone:
+              "Asia/Kolkata",
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: false,
+          }
+        ).format(new Date());
+
       const currentMinutes =
-        getCurrentIndiaMinutes();
+        timeToMinutes(
+          indiaTime
+        );
 
       if (
-        currentMinutes !==
-          null &&
+        currentMinutes !== null &&
         requestedMinutes <=
           currentMinutes
       ) {
@@ -1100,27 +674,18 @@ app.post(
 
     try {
       // --------------------------------------------
-      // Extra availability check
+      // QUICK DOUBLE-BOOKING CHECK
       // --------------------------------------------
 
       const existing =
         await pool.query(
           `
           SELECT id
-
           FROM appointments
-
           WHERE doctor = $1
-
             AND appt_date = $2
-
             AND appt_time = $3
-
-            AND status IN (
-              'pending',
-              'confirmed'
-            )
-
+            AND status IN ('pending', 'confirmed')
           LIMIT 1
           `,
           [
@@ -1131,46 +696,43 @@ app.post(
         );
 
       if (
-        existing.rows.length >
-        0
+        existing.rows.length > 0
       ) {
         return res.status(409).json({
           error:
-            "That appointment slot is already booked. Please select another time.",
+            "That appointment slot was just booked. Please choose another time.",
         });
       }
 
       // --------------------------------------------
-      // Create appointment
+      // INSERT
       // --------------------------------------------
 
       const result =
         await pool.query(
           `
           INSERT INTO appointments
-          (
-            name,
-            phone,
-            email,
-            service,
-            doctor,
-            appt_date,
-            appt_time,
-            notes
-          )
-
+            (
+              name,
+              phone,
+              email,
+              service,
+              doctor,
+              appt_date,
+              appt_time,
+              notes
+            )
           VALUES
-          (
-            $1,
-            $2,
-            $3,
-            $4,
-            $5,
-            $6,
-            $7,
-            $8
-          )
-
+            (
+              $1,
+              $2,
+              $3,
+              $4,
+              $5,
+              $6,
+              $7,
+              $8
+            )
           RETURNING
             id,
             status,
@@ -1180,13 +742,10 @@ app.post(
           `,
           [
             String(name).trim(),
-
             cleanPhone,
 
             email
-              ? String(
-                  email
-                ).trim()
+              ? String(email).trim()
               : null,
 
             String(
@@ -1196,7 +755,6 @@ app.post(
             selectedDoctor.name,
 
             date,
-
             time,
 
             notes
@@ -1211,24 +769,21 @@ app.post(
         result.rows[0]
       );
     } catch (err) {
-      console.error(
-        "Appointment creation error:",
-        err
-      );
-
-      // --------------------------------------------
-      // PostgreSQL unique violation
-      // --------------------------------------------
-
+      // PostgreSQL unique violation.
       if (
         err?.code ===
         "23505"
       ) {
         return res.status(409).json({
           error:
-            "Sorry, that appointment slot was just booked by someone else. Please select another time.",
+            "That appointment slot was just booked. Please choose another time.",
         });
       }
+
+      console.error(
+        "Appointment creation error:",
+        err
+      );
 
       res.status(500).json({
         error:
@@ -1254,9 +809,7 @@ app.get(
       );
 
     if (
-      !/^\d{10}$/.test(
-        phone
-      )
+      !/^\d{10}$/.test(phone)
     ) {
       return res.status(400).json({
         error:
@@ -1274,13 +827,9 @@ app.get(
             appt_date,
             appt_time,
             status
-
           FROM appointments
-
           WHERE phone = $1
-
           ORDER BY created_at DESC
-
           LIMIT 3
           `,
           [phone]
@@ -1316,11 +865,8 @@ app.get(
       const result =
         await pool.query(`
           SELECT *
-
           FROM appointments
-
           ORDER BY created_at DESC
-
           LIMIT 200
         `);
 
@@ -1343,16 +889,15 @@ app.get(
 );
 
 // ==================================================
-// ADMIN — UPDATE APPOINTMENT STATUS
+// ADMIN — UPDATE STATUS
 // ==================================================
 
 app.patch(
   "/api/appointments/:id",
   requireAdmin,
   async (req, res) => {
-    const {
-      status,
-    } = req.body || {};
+    const { status } =
+      req.body || {};
 
     const allowedStatuses = [
       "pending",
@@ -1376,9 +921,7 @@ app.patch(
       await pool.query(
         `
         UPDATE appointments
-
         SET status = $1
-
         WHERE id = $2
         `,
         [
@@ -1405,14 +948,139 @@ app.patch(
 );
 
 // ==================================================
-// CHATBOT KNOWLEDGE BASE
+// DOCTORS
+// ==================================================
+
+const DOCTORS = [
+  {
+    id: "dr-chandu-reddy",
+    name: "Dr. Chandu Reddy",
+    specialization:
+      "Chief Dental Surgeon",
+    experience:
+      "10+ Years Experience",
+    qualification: "BDS",
+    focus:
+      "General Dentistry & Oral Care",
+
+    startTime: "10:00",
+    endTime: "19:30",
+
+    workingDays: [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+    ],
+
+    image:
+      "https://placehold.co/600x600/f5f1e8/0f3028?text=Dr.+Chandu+Reddy",
+
+    demo: true,
+  },
+
+  {
+    id: "dr-priya-sharma",
+    name: "Dr. Priya Sharma",
+    specialization:
+      "Orthodontist",
+    experience:
+      "8+ Years Experience",
+    qualification:
+      "BDS, MDS Orthodontics",
+    focus:
+      "Braces & Clear Aligners",
+
+    startTime: "10:00",
+    endTime: "19:30",
+
+    workingDays: [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+    ],
+
+    image:
+      "https://placehold.co/600x600/f5f1e8/0f3028?text=Dr.+Priya+Sharma",
+
+    demo: true,
+  },
+
+  {
+    id: "dr-arjun-mehta",
+    name: "Dr. Arjun Mehta",
+    specialization:
+      "Endodontist",
+    experience:
+      "9+ Years Experience",
+    qualification:
+      "BDS, MDS Endodontics",
+    focus:
+      "Root Canal Treatment",
+
+    startTime: "10:00",
+    endTime: "19:30",
+
+    workingDays: [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+    ],
+
+    image:
+      "https://placehold.co/600x600/f5f1e8/0f3028?text=Dr.+Arjun+Mehta",
+
+    demo: true,
+  },
+
+  {
+    id: "dr-sneha-iyer",
+    name: "Dr. Sneha Iyer",
+    specialization:
+      "Periodontist",
+    experience:
+      "7+ Years Experience",
+    qualification:
+      "BDS, MDS Periodontics",
+    focus:
+      "Gum Care & Dental Implants",
+
+    startTime: "10:00",
+    endTime: "19:30",
+
+    workingDays: [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+    ],
+
+    image:
+      "https://placehold.co/600x600/f5f1e8/0f3028?text=Dr.+Sneha+Iyer",
+
+    demo: true,
+  },
+];
+
+// ==================================================
+// HOSPITAL KNOWLEDGE BASE
 // ==================================================
 
 const KB = [
-  // ------------------------------------------------
-  // HOSPITAL INFORMATION
-  // ------------------------------------------------
-
   {
     id: "hospital-info",
 
@@ -1434,8 +1102,6 @@ const KB = [
       "number",
       "contact",
       "call",
-      "doctor",
-      "chandu",
     ],
 
     aliases: [
@@ -1452,15 +1118,12 @@ const KB = [
       "hospital timings",
       "contact number",
       "phone number",
+      "opening hours",
     ],
 
     text:
-      "Dr. Chandu's Multi-speciality Dental Hospital is on the 1st floor, V complex, near Sri Chaitanya School, Sunkara Palem, Andhra Pradesh 533464. The hospital's booking hours are 10:00 AM to 7:30 PM daily. Phone: 090522 09930.",
+      "Dr. Chandu's Multi-speciality Dental Hospital is on the 1st floor, V complex, near Sri Chaitanya School, Sunkara Palem, Andhra Pradesh 533464. The hospital is open daily from 10:00 AM to 7:30 PM. Phone: 090522 09930.",
   },
-
-  // ------------------------------------------------
-  // DOCTORS
-  // ------------------------------------------------
 
   {
     id: "doctors",
@@ -1470,138 +1133,60 @@ const KB = [
       "doctors",
       "dentist",
       "specialist",
+      "specialists",
       "chandu",
+      "priya",
+      "arjun",
+      "sneha",
       "orthodontist",
       "endodontist",
       "periodontist",
-      "braces doctor",
-      "implant doctor",
     ],
 
     aliases: [
-      "who are the doctors",
-      "which doctors are available",
-      "tell me about doctors",
+      "our doctors",
+      "meet the doctors",
       "dental specialists",
-      "your doctors",
+      "specialist doctors",
+      "who are the doctors",
+      "doctor list",
+      "available doctors",
+      "which doctor",
+      "doctor names",
+      "about the doctors",
     ],
 
     text:
-      "The website currently contains four demo doctor profiles: Dr. Chandu Reddy, Chief Dental Surgeon specializing in General Dentistry & Oral Care; Dr. Priya Sharma, Orthodontist specializing in Braces & Clear Aligners; Dr. Arjun Mehta, Endodontist specializing in Root Canal Treatment; and Dr. Sneha Iyer, Periodontist specializing in Gum Care & Dental Implants. These are demo profiles and should be replaced with verified hospital doctor information before presenting them as actual staff.",
+      "The website currently uses temporary demo doctor profiles for development: Dr. Chandu Reddy — Chief Dental Surgeon, General Dentistry & Oral Care; Dr. Priya Sharma — Orthodontist, Braces & Clear Aligners; Dr. Arjun Mehta — Endodontist, Root Canal Treatment; Dr. Sneha Iyer — Periodontist, Gum Care & Dental Implants. These profiles are placeholders and must be replaced or verified by the hospital before public use.",
   },
 
-  // ------------------------------------------------
-  // ROOT CANAL
-  // ------------------------------------------------
-
   {
-    id: "faq-root-canal",
+    id: "faq-checkups",
 
     keywords: [
-      "root canal",
-      "rct",
-      "pulp",
-      "nerve",
-      "canal",
+      "check up",
+      "checkups",
+      "check-up",
+      "check-ups",
+      "examination",
+      "exam",
+      "consultation",
+      "consult",
     ],
 
     aliases: [
-      "root canal treatment",
-      "root canal cost",
-      "root canal price",
-      "how much root canal",
-      "rct cost",
-      "rct price",
+      "dental checkup",
+      "dental check-up",
+      "routine checkup",
+      "routine dental checkup",
+      "teeth examination",
+      "oral examination",
+      "general dental checkup",
     ],
 
     text:
-      "A root canal typically costs ₹3,500–₹8,000 depending on the tooth. It is done under local anaesthesia across 1–2 visits.",
+      "Dental check-ups are used for routine examination of your teeth and gums and for identifying dental concerns early. The dentist can recommend any further treatment after an examination.",
   },
-
-  // ------------------------------------------------
-  // IMPLANTS
-  // ------------------------------------------------
-
-  {
-    id: "faq-implants",
-
-    keywords: [
-      "implant",
-      "implants",
-      "missing tooth",
-      "missing teeth",
-    ],
-
-    aliases: [
-      "dental implant",
-      "dental implants",
-      "implant cost",
-      "implant price",
-      "replace missing tooth",
-      "tooth replacement",
-    ],
-
-    text:
-      "Dental implants generally cost ₹25,000–₹45,000 per tooth including the crown, with 3–6 months healing before the final crown.",
-  },
-
-  // ------------------------------------------------
-  // BRACES
-  // ------------------------------------------------
-
-  {
-    id: "faq-braces",
-
-    keywords: [
-      "braces",
-      "align",
-      "crooked",
-      "orthodontic",
-      "invisalign",
-    ],
-
-    aliases: [
-      "dental braces",
-      "teeth braces",
-      "crooked teeth",
-      "straighten teeth",
-      "braces cost",
-      "braces price",
-    ],
-
-    text:
-      "Braces start around ₹25,000 for metal and ₹45,000+ for ceramic/clear aligners, over 12–24 months.",
-  },
-
-  // ------------------------------------------------
-  // WHITENING
-  // ------------------------------------------------
-
-  {
-    id: "faq-whitening",
-
-    keywords: [
-      "whitening",
-      "white teeth",
-      "stain",
-      "stains",
-    ],
-
-    aliases: [
-      "teeth whitening",
-      "make teeth white",
-      "whitening cost",
-      "whitening price",
-      "remove teeth stains",
-    ],
-
-    text:
-      "In-clinic whitening starts around ₹4,000–₹6,000 per session, takes roughly 45 minutes, and can last 6–12 months.",
-  },
-
-  // ------------------------------------------------
-  // CLEANING
-  // ------------------------------------------------
 
   {
     id: "faq-cleaning",
@@ -1627,9 +1212,36 @@ const KB = [
       "Scaling and polishing costs around ₹800–₹1,500, takes about 30 minutes, and is recommended every 6 months.",
   },
 
-  // ------------------------------------------------
-  // EMERGENCY
-  // ------------------------------------------------
+  {
+    id: "faq-fillings-sealants",
+
+    keywords: [
+      "filling",
+      "fillings",
+      "sealant",
+      "sealants",
+      "cavity",
+      "cavities",
+      "decay",
+      "tooth decay",
+    ],
+
+    aliases: [
+      "dental filling",
+      "tooth filling",
+      "teeth filling",
+      "fillings and sealants",
+      "fillings & sealants",
+      "cavity filling",
+      "cavity treatment",
+      "tooth cavity",
+      "dental sealants",
+      "sealant treatment",
+    ],
+
+    text:
+      "Fillings are used to repair teeth affected by cavities or decay. Dental sealants can help protect the chewing surfaces of teeth from cavities. The exact treatment and cost depend on the tooth and the extent of the decay. Please contact the hospital at 090522 09930 for an examination and current treatment details.",
+  },
 
   {
     id: "faq-emergency",
@@ -1641,6 +1253,7 @@ const KB = [
       "broken tooth",
       "swelling",
       "fever",
+      "trauma",
     ],
 
     aliases: [
@@ -1653,12 +1266,8 @@ const KB = [
     ],
 
     text:
-      "The hospital handles emergency care for severe pain, broken teeth or trauma. Call 090522 09930 and the team can advise you about same-day care where possible. The hospital's booking hours are 10:00 AM to 7:30 PM daily.",
+      "The hospital handles emergency care for severe pain, broken teeth or trauma. Call 090522 09930 and the team will fit you in the same day where possible. The hospital is open from 10:00 AM to 7:30 PM daily.",
   },
-
-  // ------------------------------------------------
-  // PAEDIATRICS
-  // ------------------------------------------------
 
   {
     id: "faq-paediatrics",
@@ -1683,9 +1292,300 @@ const KB = [
       "Paediatric dentistry covers check-ups, fillings and sealants for children in a calm, kid-friendly setting.",
   },
 
-  // ------------------------------------------------
-  // EXTRACTION AFTERCARE
-  // ------------------------------------------------
+  {
+    id: "faq-whitening",
+
+    keywords: [
+      "whitening",
+      "white teeth",
+      "stain",
+      "stains",
+    ],
+
+    aliases: [
+      "teeth whitening",
+      "make teeth white",
+      "whitening cost",
+      "whitening price",
+      "remove teeth stains",
+    ],
+
+    text:
+      "In-clinic whitening starts around ₹4,000–₹6,000 per session, takes roughly 45 minutes, and can last 6–12 months.",
+  },
+
+  {
+    id: "faq-veneers-crowns",
+
+    keywords: [
+      "veneer",
+      "veneers",
+      "crown",
+      "crowns",
+      "cap",
+      "caps",
+    ],
+
+    aliases: [
+      "veneers and crowns",
+      "veneers & crowns",
+      "dental veneer",
+      "dental veneers",
+      "dental crown",
+      "tooth crown",
+      "dental caps",
+    ],
+
+    text:
+      "Veneers and crowns are restorative and cosmetic dental options. The suitable option depends on the condition and appearance of the tooth, so an examination is needed before treatment is recommended. Please call 090522 09930 for current treatment details and pricing.",
+  },
+
+  {
+    id: "faq-bonding",
+
+    keywords: [
+      "bonding",
+      "composite bonding",
+      "tooth bonding",
+    ],
+
+    aliases: [
+      "dental bonding",
+      "cosmetic bonding",
+      "tooth coloured bonding",
+    ],
+
+    text:
+      "Dental bonding uses tooth-coloured material to improve the shape or appearance of a tooth or repair minor defects. The dentist can confirm whether bonding is suitable after examining the tooth.",
+  },
+
+  {
+    id: "faq-reshaping",
+
+    keywords: [
+      "reshaping",
+      "reshape",
+      "contouring",
+      "recontouring",
+    ],
+
+    aliases: [
+      "teeth reshaping",
+      "tooth reshaping",
+      "dental contouring",
+      "enamel reshaping",
+    ],
+
+    text:
+      "Teeth reshaping or contouring can make small changes to the shape of a tooth. The dentist should examine the tooth first to determine whether the procedure is appropriate.",
+  },
+
+  {
+    id: "faq-laser",
+
+    keywords: [
+      "laser",
+      "laser dentistry",
+    ],
+
+    aliases: [
+      "laser dental treatment",
+      "laser treatment",
+      "dental laser",
+    ],
+
+    text:
+      "Laser dentistry uses dental laser technology for selected procedures. The exact use depends on the patient's dental condition and the treatment recommended by the dentist.",
+  },
+
+  {
+    id: "faq-implants",
+
+    keywords: [
+      "implant",
+      "implants",
+      "missing tooth",
+      "missing teeth",
+    ],
+
+    aliases: [
+      "dental implant",
+      "dental implants",
+      "implant cost",
+      "implant price",
+      "replace missing tooth",
+      "tooth replacement",
+    ],
+
+    text:
+      "Dental implants generally cost ₹25,000–₹45,000 per tooth including the crown, with 3–6 months healing before the final crown.",
+  },
+
+  {
+    id: "faq-root-canal",
+
+    keywords: [
+      "root canal",
+      "rct",
+      "pulp",
+      "nerve",
+      "canal",
+    ],
+
+    aliases: [
+      "root canal treatment",
+      "root canal cost",
+      "root canal price",
+      "how much root canal",
+      "rct cost",
+      "rct price",
+    ],
+
+    text:
+      "A root canal typically costs ₹3,500–₹8,000 depending on the tooth. It is done under local anaesthesia across 1–2 visits.",
+  },
+
+  {
+    id: "faq-extractions",
+
+    keywords: [
+      "extraction",
+      "extractions",
+      "tooth removed",
+      "tooth removal",
+      "wisdom tooth",
+      "wisdom teeth",
+    ],
+
+    aliases: [
+      "tooth extraction",
+      "teeth extraction",
+      "remove tooth",
+      "tooth removal treatment",
+      "wisdom tooth removal",
+    ],
+
+    text:
+      "Tooth extraction is used when a tooth needs to be removed. The dentist will examine the tooth and explain the treatment, expected recovery and aftercare. For current pricing or an appointment, call 090522 09930.",
+  },
+
+  {
+    id: "faq-oral-surgery",
+
+    keywords: [
+      "oral surgery",
+      "surgery",
+      "surgical",
+      "jaw surgery",
+    ],
+
+    aliases: [
+      "dental surgery",
+      "oral surgical treatment",
+      "mouth surgery",
+    ],
+
+    text:
+      "Oral surgery covers selected surgical procedures involving the mouth and related structures. The exact procedure depends on the patient's condition and requires a dental examination and treatment plan.",
+  },
+
+  {
+    id: "faq-dentures-bridges",
+
+    keywords: [
+      "denture",
+      "dentures",
+      "bridge",
+      "bridges",
+      "missing teeth",
+    ],
+
+    aliases: [
+      "dentures and bridges",
+      "dentures & bridges",
+      "dental bridge",
+      "tooth bridge",
+      "false teeth",
+      "replace missing teeth",
+    ],
+
+    text:
+      "Dentures and dental bridges can be used to replace missing teeth. The appropriate option depends on the number and condition of the missing teeth and the surrounding oral structures.",
+  },
+
+  {
+    id: "faq-mouth-guards",
+
+    keywords: [
+      "mouth guard",
+      "mouth guards",
+      "mouthguard",
+      "mouthguards",
+      "night guard",
+      "sports guard",
+    ],
+
+    aliases: [
+      "dental mouth guard",
+      "teeth grinding guard",
+      "night mouth guard",
+      "sports mouth guard",
+    ],
+
+    text:
+      "Mouth guards can help protect teeth during sports or, when prescribed, help manage tooth grinding. A dentist can recommend the appropriate type after an examination.",
+  },
+
+  {
+    id: "faq-xray",
+
+    keywords: [
+      "x ray",
+      "x-ray",
+      "xray",
+      "radiograph",
+      "dental x ray",
+    ],
+
+    aliases: [
+      "dental x-ray",
+      "dental x ray",
+      "tooth xray",
+      "teeth x ray",
+      "x-ray scan",
+    ],
+
+    text:
+      "Dental X-rays can help the dentist assess teeth and structures that may not be visible during a routine examination. The dentist will recommend an X-ray when it is clinically needed.",
+  },
+
+  {
+    id: "faq-braces",
+
+    keywords: [
+      "braces",
+      "align",
+      "aligner",
+      "aligners",
+      "crooked",
+      "orthodontic",
+      "invisalign",
+    ],
+
+    aliases: [
+      "dental braces",
+      "teeth braces",
+      "crooked teeth",
+      "straighten teeth",
+      "braces cost",
+      "braces price",
+      "clear aligners",
+      "braces and aligners",
+    ],
+
+    text:
+      "Braces start around ₹25,000 for metal and ₹45,000+ for ceramic/clear aligners, over 12–24 months.",
+  },
 
   {
     id: "care-extraction",
@@ -1717,10 +1617,6 @@ const KB = [
       "After an extraction: bite the gauze for 30–45 minutes, avoid rinsing, hard spitting, smoking and straws for 24 hours, eat soft cool foods, and take prescribed painkillers. Call the hospital if bleeding or pain is severe after 24 hours.",
   },
 
-  // ------------------------------------------------
-  // TOOTHACHE
-  // ------------------------------------------------
-
   {
     id: "care-toothache",
 
@@ -1741,207 +1637,12 @@ const KB = [
     ],
 
     text:
-      "For toothache: rinse with warm salt water, take an OTC pain reliever if appropriate for you, avoid very hot or cold foods, and avoid chewing on that side. Severe pain with swelling or fever requires prompt dental attention — call 090522 09930.",
-  },
-
-  // ------------------------------------------------
-  // GENERAL CHECKUPS
-  // ------------------------------------------------
-
-  {
-    id: "faq-checkups",
-
-    keywords: [
-      "checkup",
-      "check-up",
-      "check up",
-      "examination",
-      "exam",
-      "routine",
-    ],
-
-    aliases: [
-      "dental checkup",
-      "dental check-up",
-      "routine checkup",
-      "routine dental examination",
-      "teeth checkup",
-    ],
-
-    text:
-      "Regular dental check-ups help identify dental problems early. You can book a dental appointment through the website.",
-  },
-
-  // ------------------------------------------------
-  // FILLINGS
-  // ------------------------------------------------
-
-  {
-    id: "faq-fillings",
-
-    keywords: [
-      "filling",
-      "fillings",
-      "cavity",
-      "cavities",
-      "decay",
-      "tooth decay",
-    ],
-
-    aliases: [
-      "dental filling",
-      "tooth filling",
-      "cavity filling",
-      "fill cavity",
-      "cavity treatment",
-    ],
-
-    text:
-      "Dental fillings are used to restore teeth affected by cavities or decay. The exact treatment and cost depend on the tooth and the extent of the decay.",
-  },
-
-  // ------------------------------------------------
-  // SEALANTS
-  // ------------------------------------------------
-
-  {
-    id: "faq-sealants",
-
-    keywords: [
-      "sealant",
-      "sealants",
-      "dental sealant",
-    ],
-
-    aliases: [
-      "tooth sealant",
-      "dental sealants",
-      "sealant treatment",
-    ],
-
-    text:
-      "Dental sealants are protective coatings that can help protect the grooves of teeth from decay, particularly in children.",
-  },
-
-  // ------------------------------------------------
-  // VENEERS
-  // ------------------------------------------------
-
-  {
-    id: "faq-veneers",
-
-    keywords: [
-      "veneer",
-      "veneers",
-    ],
-
-    aliases: [
-      "dental veneer",
-      "dental veneers",
-      "teeth veneers",
-    ],
-
-    text:
-      "Veneers are thin restorations used for cosmetic improvement of the appearance of teeth. Treatment suitability should be assessed by a dentist.",
-  },
-
-  // ------------------------------------------------
-  // CROWNS
-  // ------------------------------------------------
-
-  {
-    id: "faq-crowns",
-
-    keywords: [
-      "crown",
-      "crowns",
-      "dental crown",
-    ],
-
-    aliases: [
-      "tooth crown",
-      "dental crowns",
-      "crown treatment",
-    ],
-
-    text:
-      "Dental crowns are restorations used to protect or restore damaged teeth. The appropriate type depends on the individual tooth and clinical assessment.",
-  },
-
-  // ------------------------------------------------
-  // DENTURES
-  // ------------------------------------------------
-
-  {
-    id: "faq-dentures",
-
-    keywords: [
-      "denture",
-      "dentures",
-      "false teeth",
-    ],
-
-    aliases: [
-      "dental dentures",
-      "false teeth",
-      "tooth replacement dentures",
-    ],
-
-    text:
-      "Dentures are removable dental appliances used to replace missing teeth. The suitable option depends on the patient's dental condition.",
-  },
-
-  // ------------------------------------------------
-  // BRIDGES
-  // ------------------------------------------------
-
-  {
-    id: "faq-bridges",
-
-    keywords: [
-      "bridge",
-      "bridges",
-      "dental bridge",
-    ],
-
-    aliases: [
-      "dental bridges",
-      "tooth bridge",
-      "replace missing teeth",
-    ],
-
-    text:
-      "Dental bridges can be used to replace one or more missing teeth by connecting a replacement tooth to supporting teeth or structures.",
-  },
-
-  // ------------------------------------------------
-  // X-RAY
-  // ------------------------------------------------
-
-  {
-    id: "faq-xray",
-
-    keywords: [
-      "x ray",
-      "x-ray",
-      "xray",
-      "radiograph",
-    ],
-
-    aliases: [
-      "dental x ray",
-      "dental x-ray",
-      "tooth xray",
-      "teeth x ray",
-    ],
-
-    text:
-      "Dental X-rays can help dentists examine structures that may not be visible during a regular oral examination.",
+      "For toothache: rinse with warm salt water, take an OTC pain reliever, avoid very hot or cold foods, and avoid chewing on that side. Severe pain with swelling or fever is an emergency — call 090522 09930.",
   },
 ];
 
 // ==================================================
-// RETRIEVAL
+// RAG RETRIEVAL
 // ==================================================
 
 function retrieve(
@@ -1966,7 +1667,7 @@ function retrieve(
       let score = 0;
 
       // --------------------------------------------
-      // Keyword matching
+      // KEYWORD MATCHING
       // --------------------------------------------
 
       for (
@@ -1991,6 +1692,7 @@ function retrieve(
               : 2;
         }
 
+        // Singular/plural-friendly
         const words =
           normalizedKeyword.split(
             " "
@@ -2010,7 +1712,7 @@ function retrieve(
       }
 
       // --------------------------------------------
-      // Alias matching
+      // ALIAS MATCHING
       // --------------------------------------------
 
       for (
@@ -2018,9 +1720,7 @@ function retrieve(
         of chunk.aliases || []
       ) {
         const normalizedAlias =
-          normalizeText(
-            alias
-          );
+          normalizeText(alias);
 
         if (
           q.includes(
@@ -2032,7 +1732,7 @@ function retrieve(
       }
 
       // --------------------------------------------
-      // Text overlap
+      // WORD OVERLAP
       // --------------------------------------------
 
       const textWords =
@@ -2046,9 +1746,7 @@ function retrieve(
           );
 
       const uniqueTextWords =
-        new Set(
-          textWords
-        );
+        new Set(textWords);
 
       for (
         const word
@@ -2079,10 +1777,7 @@ function retrieve(
       (item) =>
         item.score >= 1.5
     )
-    .slice(
-      0,
-      topK
-    )
+    .slice(0, topK)
     .map(
       (item) =>
         item.chunk
@@ -2090,10 +1785,10 @@ function retrieve(
 }
 
 // ==================================================
-// GEMINI ANSWER
+// GROQ RAG ANSWER
 // ==================================================
 
-async function askGemini(
+async function askGroq(
   userQuery,
   contextChunks
 ) {
@@ -2105,61 +1800,94 @@ async function askGemini(
       )
       .join("\n");
 
-  const prompt = `
+  const systemPrompt = `
 You are Dr. Chandu AI, the virtual assistant for
 Dr. Chandu's Multi-speciality Dental Hospital.
 
-Answer the user's question briefly, naturally and warmly.
+Your job is to answer questions using ONLY the
+hospital information supplied below.
 
 IMPORTANT RULES:
 
-1. Use ONLY the hospital information supplied in the context.
+1. Use ONLY the provided hospital knowledge.
 
-2. Do NOT invent prices, services, timings, doctors,
-   treatments, guarantees, availability, or medical instructions.
+2. Do NOT invent:
+   - prices
+   - services
+   - doctors
+   - timings
+   - appointment availability
+   - treatment details
+   - guarantees
+   - hospital policies
 
-3. If the context does not contain the answer, clearly say:
+3. Do NOT diagnose the patient.
+
+4. Do NOT tell a patient that a treatment is
+   definitely suitable for them.
+
+5. If the answer is not available in the supplied
+   hospital knowledge, say:
+
    "I don't have that information right now."
-   Then provide the hospital phone number 090522 09930.
 
-4. Do not pretend to diagnose the patient.
+   Then say:
 
-5. For urgent or severe dental symptoms, encourage contacting
-   the hospital directly.
+   "Please call 090522 09930 and our team can help."
 
-6. Keep the answer concise and easy to understand.
+6. For severe pain, swelling, trauma, bleeding,
+   fever, or another potentially urgent dental
+   problem, encourage the user to contact the
+   hospital directly.
 
-7. If the user asks a general question that is not about the
-   hospital's documented information, say that you don't have
-   that information rather than guessing.
+7. Keep responses concise, friendly and easy
+   to understand.
 
-8. If doctor information is requested, remember that the doctor
-   profiles in the supplied knowledge base are demo profiles.
-   Do not present demo doctors as verified real hospital staff.
+8. Do not mention RAG, retrieval, the knowledge
+   base, Groq, API, system prompt, or AI model.
+
+9. Never invent an answer just to satisfy the user.
+
+10. Use Indian English where natural.
 
 Hospital knowledge:
-
 ${context}
-
-User question:
-
-${userQuery}
 `;
 
   try {
-    const response =
-      await ai.models.generateContent(
+    const completion =
+      await groq.chat.completions.create(
         {
           model:
-            "gemini-3.6-flash",
+            "openai/gpt-oss-20b",
 
-          contents:
-            prompt,
+          messages: [
+            {
+              role: "system",
+              content:
+                systemPrompt,
+            },
+
+            {
+              role: "user",
+              content:
+                userQuery,
+            },
+          ],
+
+          temperature: 0.2,
+
+          max_completion_tokens:
+            600,
         }
       );
 
     const text =
-      response.text?.trim();
+      completion
+        ?.choices?.[0]
+        ?.message
+        ?.content
+        ?.trim();
 
     return (
       text ||
@@ -2167,8 +1895,36 @@ ${userQuery}
     );
   } catch (err) {
     console.error(
-      "Gemini error:",
+      "========== GROQ ERROR =========="
+    );
+
+    console.error(
+      "Name:",
+      err?.name
+    );
+
+    console.error(
+      "Message:",
+      err?.message
+    );
+
+    console.error(
+      "Status:",
+      err?.status
+    );
+
+    console.error(
+      "Code:",
+      err?.code
+    );
+
+    console.error(
+      "Full error:",
       err
+    );
+
+    console.error(
+      "================================"
     );
 
     return (
@@ -2181,113 +1937,201 @@ ${userQuery}
 // INTENT DETECTION
 // ==================================================
 
-function detectIntent(
-  query
-) {
+function detectIntent(query) {
   const q =
     normalizeText(query);
-
-  // ----------------------------------------------
-  // Booking intent
-  // ----------------------------------------------
 
   const wantsBooking =
     /\b(book|booking|appointment|schedule|visit)\b/.test(
       q
     );
 
-  // ----------------------------------------------
-  // Services
-  // ----------------------------------------------
-
-  const directService =
+  const servicePatterns = [
     [
-      "root canal",
-      "implant",
-      "braces",
-      "whitening",
-      "cleaning",
-      "extraction",
-      "paediatric",
-      "pediatric",
-      "x ray",
-      "x-ray",
-      "veneer",
-      "crown",
-      "denture",
-      "bridge",
-      "filling",
-      "sealant",
-      "checkup",
-      "check-up",
-    ].find(
-      (service) =>
-        q.includes(service)
-    );
-
-  const map = {
-    "root canal":
-      "Root Canals",
-
-    implant:
-      "Dental Implants",
-
-    braces:
-      "Braces",
-
-    whitening:
-      "Teeth Whitening",
-
-    cleaning:
-      "Teeth Cleaning",
-
-    extraction:
-      "Extractions",
-
-    paediatric:
-      "Paediatrics",
-
-    pediatric:
-      "Paediatrics",
-
-    "x ray":
-      "X-ray",
-
-    "x-ray":
-      "X-ray",
-
-    veneer:
-      "Veneers & Crowns",
-
-    crown:
-      "Veneers & Crowns",
-
-    denture:
-      "Dentures & Bridges",
-
-    bridge:
-      "Dentures & Bridges",
-
-    filling:
-      "Fillings",
-
-    sealant:
       "Fillings & Sealants",
+      [
+        "fillings and sealants",
+        "fillings sealants",
+        "filling",
+        "fillings",
+        "sealant",
+        "sealants",
+        "cavity",
+      ],
+    ],
 
-    checkup:
-      "General Dentistry",
+    [
+      "Check-ups",
+      [
+        "check up",
+        "checkup",
+        "check-ups",
+        "checkups",
+        "consultation",
+      ],
+    ],
 
-    "check-up":
-      "General Dentistry",
-  };
+    [
+      "Teeth Cleaning",
+      [
+        "cleaning",
+        "scaling",
+        "tartar",
+        "plaque",
+      ],
+    ],
+
+    [
+      "Emergency Care",
+      [
+        "emergency",
+        "urgent dental care",
+      ],
+    ],
+
+    [
+      "Paediatrics",
+      [
+        "paediatric",
+        "pediatric",
+        "child dentist",
+        "children dentist",
+      ],
+    ],
+
+    [
+      "Teeth Whitening",
+      [
+        "whitening",
+        "white teeth",
+      ],
+    ],
+
+    [
+      "Veneers & Crowns",
+      [
+        "veneer",
+        "veneers",
+        "crown",
+        "crowns",
+      ],
+    ],
+
+    [
+      "Bonding",
+      [
+        "bonding",
+        "composite bonding",
+      ],
+    ],
+
+    [
+      "Teeth Reshaping",
+      [
+        "reshaping",
+        "reshape",
+        "contouring",
+      ],
+    ],
+
+    [
+      "Laser Dentistry",
+      [
+        "laser dentistry",
+        "laser dental",
+        "laser treatment",
+      ],
+    ],
+
+    [
+      "Dental Implants",
+      [
+        "implant",
+        "implants",
+      ],
+    ],
+
+    [
+      "Root Canals",
+      [
+        "root canal",
+        "rct",
+      ],
+    ],
+
+    [
+      "Extractions",
+      [
+        "extraction",
+        "extractions",
+        "tooth removal",
+        "wisdom tooth",
+      ],
+    ],
+
+    [
+      "Oral Surgery",
+      [
+        "oral surgery",
+        "dental surgery",
+        "mouth surgery",
+      ],
+    ],
+
+    [
+      "Dentures & Bridges",
+      [
+        "denture",
+        "dentures",
+        "bridge",
+        "bridges",
+      ],
+    ],
+
+    [
+      "Mouth Guards",
+      [
+        "mouth guard",
+        "mouthguard",
+        "night guard",
+        "sports guard",
+      ],
+    ],
+
+    [
+      "X-ray",
+      [
+        "x ray",
+        "x-ray",
+        "xray",
+        "radiograph",
+      ],
+    ],
+  ];
+
+  let service = null;
+
+  for (
+    const [
+      serviceName,
+      patterns,
+    ] of servicePatterns
+  ) {
+    if (
+      patterns.some(
+        (pattern) =>
+          q.includes(pattern)
+      )
+    ) {
+      service =
+        serviceName;
+      break;
+    }
+  }
 
   return {
     wantsBooking,
-
-    service:
-      directService
-        ? map[directService]
-        : null,
+    service,
   };
 }
 
@@ -2311,9 +2155,9 @@ app.post(
     }
 
     try {
-      // ============================================
+      // --------------------------------------------
       // APPOINTMENT STATUS
-      // ============================================
+      // --------------------------------------------
 
       const phoneMatch =
         userQuery.match(
@@ -2347,13 +2191,9 @@ app.post(
               appt_date,
               appt_time,
               status
-
             FROM appointments
-
             WHERE phone = $1
-
             ORDER BY created_at DESC
-
             LIMIT 3
             `,
             [
@@ -2373,8 +2213,7 @@ app.post(
               label:
                 "Book an appointment now",
 
-              service:
-                null,
+              service: null,
             },
           });
         }
@@ -2382,23 +2221,26 @@ app.post(
         const text =
           result.rows
             .map(
-              (row) =>
-                `${row.service} with ${row.doctor || "the hospital"} on ${new Date(
-                  row.appt_date
-                ).toDateString()} at ${row.appt_time} is ${row.status}.`
+              (row) => {
+                const date =
+                  new Date(
+                    row.appt_date
+                  ).toDateString();
+
+                return `${row.service} with ${row.doctor || "the dental team"} on ${date} at ${row.appt_time} is ${row.status}.`;
+              }
             )
             .join(" ");
 
         return res.json({
           text,
-
           action: null,
         });
       }
 
-      // ============================================
-      // RETRIEVAL
-      // ============================================
+      // --------------------------------------------
+      // KNOWLEDGE RETRIEVAL
+      // --------------------------------------------
 
       const contextChunks =
         retrieve(
@@ -2410,9 +2252,9 @@ app.post(
           userQuery
         );
 
-      // ============================================
-      // NO CONTEXT
-      // ============================================
+      // --------------------------------------------
+      // NO RELEVANT KNOWLEDGE
+      // --------------------------------------------
 
       if (
         contextChunks.length ===
@@ -2438,15 +2280,19 @@ app.post(
         });
       }
 
-      // ============================================
-      // GEMINI
-      // ============================================
+      // --------------------------------------------
+      // GROQ RAG
+      // --------------------------------------------
 
       const text =
-        await askGemini(
+        await askGroq(
           userQuery,
           contextChunks
         );
+
+      // --------------------------------------------
+      // BOOKING ACTION
+      // --------------------------------------------
 
       const action =
         intent.wantsBooking ||
@@ -2464,7 +2310,6 @@ app.post(
 
       res.json({
         text,
-
         action,
       });
     } catch (err) {
@@ -2478,42 +2323,6 @@ app.post(
           "Chatbot service temporarily unavailable.",
       });
     }
-  }
-);
-
-// ==================================================
-// 404 HANDLER
-// ==================================================
-
-app.use(
-  (req, res) => {
-    res.status(404).json({
-      error:
-        "Endpoint not found.",
-    });
-  }
-);
-
-// ==================================================
-// GLOBAL ERROR HANDLER
-// ==================================================
-
-app.use(
-  (
-    err,
-    _req,
-    res,
-    _next
-  ) => {
-    console.error(
-      "Unhandled server error:",
-      err
-    );
-
-    res.status(500).json({
-      error:
-        "Internal server error.",
-    });
   }
 );
 
@@ -2538,30 +2347,24 @@ initDb()
         );
 
         console.log(
-          `Appointment slot duration: ${SLOT_DURATION_MINUTES} minutes`
+          `Real-time booking: ${SLOT_DURATION_MINUTES}-minute slots with doctor/date/time protection`
         );
 
         console.log(
-          `Doctors configured: ${DOCTORS.length}`
+          "AI provider: Groq"
         );
 
         console.log(
-          `Services configured: ${SERVICES.length}`
-        );
-
-        console.log(
-          `Knowledge base entries: ${KB.length}`
+          "RAG chatbot: enabled"
         );
       }
     );
   })
-  .catch(
-    (err) => {
-      console.error(
-        "Database initialization failed:",
-        err
-      );
+  .catch((err) => {
+    console.error(
+      "Database initialization failed:",
+      err
+    );
 
-      process.exit(1);
-    }
-  );
+    process.exit(1);
+  });
