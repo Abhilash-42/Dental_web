@@ -2372,7 +2372,7 @@ async function loadDoctors(){
           doctor.name;
 
         opt.textContent =
-          `${doctor.name} — ${doctor.specialty}`;
+          `${doctor.name} — ${doctor.specialization}`;
 
         doctorSelect.appendChild(opt);
 
@@ -2625,8 +2625,8 @@ doctorSelect.addEventListener(
 
     if(doctor){
 
-      doctorNote.textContent =
-        `${doctor.title || doctor.specialty} · ${doctor.qualification || ''}${doctor.experience ? ' · ' + doctor.experience : ''} · ${formatTime(doctor.startTime)}–${formatTime(doctor.endTime)} · ${formatDoctorDays(doctor.workingDays)}`;
+     doctorNote.textContent =
+  `${doctor.specialization || ''} · ${doctor.qualification || ''}${doctor.experience ? ' · ' + doctor.experience : ''} · ${formatTime(doctor.startTime)}–${formatTime(doctor.endTime)} · ${formatDoctorDays(doctor.workingDays)}`;
 
     }else{
 
