@@ -583,7 +583,7 @@
    project). Everything below talks to it over plain fetch —
    nothing here depends on being opened inside claude.ai.
    ========================================================= */
-const API_BASE = "https://dental-web-backend.onrender.com/"; // <-- replace after you deploy the backend
+const API_BASE = "https://dental-web-backend.onrender.com"; // <-- replace after you deploy the backend
 
 async function apiFetch(path, options = {}) {
   const res = await fetch(API_BASE + path, {
