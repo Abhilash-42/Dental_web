@@ -16,6 +16,9 @@
 //   DATABASE_URL
 //   ADMIN_KEY
 //   GROQ_API_KEY
+//   RESEND_API_KEY
+//   ADMIN_NOTIFICATION_EMAIL
+//   EMAIL_FROM
 //   ALLOWED_ORIGIN
 //   OPEN_TIME       optional, default 10:00
 //   CLOSE_TIME      optional, default 19:30
@@ -24,6 +27,7 @@ import express from "express";
 import cors from "cors";
 import { Pool } from "pg";
 import Groq from "groq-sdk";
+import { Resend } from "resend";
 
 const app = express();
 
@@ -35,9 +39,9 @@ app.use(
   })
 );
 
-// ==================================================
+// --------------------------------------------------
 // DATABASE
-// ==================================================
+// --------------------------------------------------
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -61,14 +65,16 @@ async function initDb() {
     );
   `);
 
-  // Safe migration for older databases
+  // Safe migration for databases created before doctor selection was added.
   await pool.query(`
     ALTER TABLE appointments
     ADD COLUMN IF NOT EXISTS doctor TEXT;
   `);
 
-  // Prevent two active appointments from using
-  // the same doctor/date/time slot.
+  // Database-level protection against two active appointments
+  // taking the same doctor/date/time slot.
+  //
+  // Declined and completed appointments do not block future bookings.
   await pool.query(`
     CREATE UNIQUE INDEX IF NOT EXISTS unique_active_doctor_slot
     ON appointments (doctor, appt_date, appt_time)
@@ -77,9 +83,9 @@ async function initDb() {
   `);
 }
 
-// ==================================================
-// GROQ AI
-// ==================================================
+// --------------------------------------------------
+// GROQ
+// --------------------------------------------------
 
 const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY,
@@ -91,12 +97,39 @@ if (!process.env.GROQ_API_KEY) {
   );
 }
 
-// ==================================================
+// --------------------------------------------------
+// RESEND EMAIL
+// --------------------------------------------------
+
+const resend = process.env.RESEND_API_KEY
+  ? new Resend(process.env.RESEND_API_KEY)
+  : null;
+
+const EMAIL_FROM =
+  process.env.EMAIL_FROM ||
+  "Dr. Chandu's Dental Hospital <onboarding@resend.dev>";
+
+const ADMIN_NOTIFICATION_EMAIL =
+  process.env.ADMIN_NOTIFICATION_EMAIL || "";
+
+if (!process.env.RESEND_API_KEY) {
+  console.warn(
+    "WARNING: RESEND_API_KEY is not configured. Email notifications are disabled."
+  );
+}
+
+if (!ADMIN_NOTIFICATION_EMAIL) {
+  console.warn(
+    "WARNING: ADMIN_NOTIFICATION_EMAIL is not configured. Admin booking emails are disabled."
+  );
+}
+
+// --------------------------------------------------
 // GENERAL HELPERS
-// ==================================================
+// --------------------------------------------------
 
 function normalizeText(text) {
-  return String(text || "")
+  return text
     .toLowerCase()
     .replace(/[^\w\s₹-]/g, " ")
     .replace(/\s+/g, " ")
@@ -116,9 +149,7 @@ function isValidTimeFormat(time) {
 function timeToMinutes(time) {
   if (!isValidTimeFormat(time)) return null;
 
-  const [hours, minutes] = time
-    .split(":")
-    .map(Number);
+  const [hours, minutes] = time.split(":").map(Number);
 
   if (
     hours < 0 ||
@@ -132,11 +163,8 @@ function timeToMinutes(time) {
   return hours * 60 + minutes;
 }
 
-const OPEN_TIME =
-  process.env.OPEN_TIME || "10:00";
-
-const CLOSE_TIME =
-  process.env.CLOSE_TIME || "19:30";
+const OPEN_TIME = process.env.OPEN_TIME || "10:00";
+const CLOSE_TIME = process.env.CLOSE_TIME || "19:30";
 
 const SLOT_DURATION_MINUTES = 30;
 
@@ -147,6 +175,9 @@ function getDoctorByName(name) {
 }
 
 function getIndiaWeekday(dateString) {
+  // Noon in India avoids edge cases around UTC midnight.
+  // 0 = Sunday ... 6 = Saturday.
+
   const date = new Date(
     `${dateString}T12:00:00+05:30`
   );
@@ -155,17 +186,15 @@ function getIndiaWeekday(dateString) {
     return null;
   }
 
-  const weekday = new Intl.DateTimeFormat(
-    "en-US",
-    {
+  const weekday =
+    new Intl.DateTimeFormat("en-US", {
       timeZone: "Asia/Kolkata",
       weekday: "short",
-    }
-  )
-    .formatToParts(date)
-    .find(
-      (part) => part.type === "weekday"
-    )?.value;
+    })
+      .formatToParts(date)
+      .find(
+        (part) => part.type === "weekday"
+      )?.value;
 
   const map = {
     Sun: 0,
@@ -194,10 +223,7 @@ function buildTimeSlots(startTime, endTime) {
 
   const slots = [];
 
-  // Appointment duration = 30 minutes.
-  // Therefore the final start time must allow
-  // the appointment to finish before closing.
-
+  // Appointment must finish by closing time.
   for (
     let minutes = start;
     minutes + SLOT_DURATION_MINUTES <= end;
@@ -221,17 +247,15 @@ function isSlotInDoctorSchedule(
   date,
   time
 ) {
-  const weekday =
-    getIndiaWeekday(date);
+  const weekday = getIndiaWeekday(date);
 
-  const requested =
-    timeToMinutes(time);
-
-  const start =
-    timeToMinutes(doctor.startTime);
-
-  const end =
-    timeToMinutes(doctor.endTime);
+  const requested = timeToMinutes(time);
+  const start = timeToMinutes(
+    doctor.startTime
+  );
+  const end = timeToMinutes(
+    doctor.endTime
+  );
 
   if (
     weekday === null ||
@@ -245,14 +269,81 @@ function isSlotInDoctorSchedule(
   return (
     doctor.workingDays.includes(weekday) &&
     requested >= start &&
-    requested + SLOT_DURATION_MINUTES <=
-      end
+    requested + SLOT_DURATION_MINUTES <= end
   );
 }
 
-// ==================================================
+// --------------------------------------------------
+// EMAIL HELPERS
+// --------------------------------------------------
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+async function sendEmail({
+  to,
+  subject,
+  html,
+}) {
+  if (!resend) {
+    console.warn(
+      "Email skipped: RESEND_API_KEY is not configured."
+    );
+
+    return null;
+  }
+
+  if (!to) {
+    console.warn(
+      "Email skipped: recipient email is missing."
+    );
+
+    return null;
+  }
+
+  try {
+    const { data, error } =
+      await resend.emails.send({
+        from: EMAIL_FROM,
+        to: [to],
+        subject,
+        html,
+      });
+
+    if (error) {
+      console.error(
+        "Resend email error:",
+        error
+      );
+
+      return null;
+    }
+
+    console.log(
+      "Email sent successfully:",
+      data?.id
+    );
+
+    return data;
+  } catch (err) {
+    console.error(
+      "Email sending failed:",
+      err
+    );
+
+    return null;
+  }
+}
+
+// --------------------------------------------------
 // ADMIN AUTH
-// ==================================================
+// --------------------------------------------------
 
 function requireAdmin(req, res, next) {
   const key = req.header("x-admin-key");
@@ -269,9 +360,9 @@ function requireAdmin(req, res, next) {
   next();
 }
 
-// ==================================================
+// --------------------------------------------------
 // HEALTH CHECK
-// ==================================================
+// --------------------------------------------------
 
 app.get("/", (_req, res) => {
   res.json({
@@ -282,9 +373,9 @@ app.get("/", (_req, res) => {
   });
 });
 
-// ==================================================
+// --------------------------------------------------
 // PUBLIC CATALOG
-// ==================================================
+// --------------------------------------------------
 
 app.get("/api/doctors", (_req, res) => {
   res.json({
@@ -316,9 +407,9 @@ app.get("/api/services", (_req, res) => {
   });
 });
 
-// ==================================================
+// --------------------------------------------------
 // REAL-TIME AVAILABILITY
-// ==================================================
+// --------------------------------------------------
 
 app.get(
   "/api/availability",
@@ -371,12 +462,9 @@ app.get(
       });
     }
 
-    const weekday =
-      getIndiaWeekday(date);
-
     if (
       !doctor.workingDays.includes(
-        weekday
+        getIndiaWeekday(date)
       )
     ) {
       return res.json({
@@ -385,32 +473,26 @@ app.get(
         working: false,
         slots: [],
         availableSlots: [],
-        message:
-          `${doctor.name} is not scheduled to work on this date.`,
+        message: `${doctor.name} is not scheduled to work on this date.`,
       });
     }
 
-    const allSlots =
-      buildTimeSlots(
-        doctor.startTime,
-        doctor.endTime
-      );
+    const allSlots = buildTimeSlots(
+      doctor.startTime,
+      doctor.endTime
+    );
 
     try {
-      const result =
-        await pool.query(
-          `
-          SELECT appt_time
-          FROM appointments
-          WHERE doctor = $1
-            AND appt_date = $2
-            AND status IN ('pending', 'confirmed')
-          `,
-          [
-            doctor.name,
-            date,
-          ]
-        );
+      const result = await pool.query(
+        `
+        SELECT appt_time
+        FROM appointments
+        WHERE doctor = $1
+          AND appt_date = $2
+          AND status IN ('pending', 'confirmed')
+        `,
+        [doctor.name, date]
+      );
 
       const booked = new Set(
         result.rows.map(
@@ -425,8 +507,7 @@ app.get(
           new Intl.DateTimeFormat(
             "en-GB",
             {
-              timeZone:
-                "Asia/Kolkata",
+              timeZone: "Asia/Kolkata",
               hour: "2-digit",
               minute: "2-digit",
               hour12: false,
@@ -434,13 +515,11 @@ app.get(
           ).format(new Date());
 
         currentMinutes =
-          timeToMinutes(
-            indiaTime
-          );
+          timeToMinutes(indiaTime);
       }
 
-      const slots =
-        allSlots.map((time) => {
+      const slots = allSlots.map(
+        (time) => {
           const minutes =
             timeToMinutes(time);
 
@@ -462,7 +541,8 @@ app.get(
               ? "past"
               : null,
           };
-        });
+        }
+      );
 
       res.json({
         doctor: doctor.name,
@@ -480,16 +560,13 @@ app.get(
 
         slots,
 
-        availableSlots:
-          slots
-            .filter(
-              (slot) =>
-                slot.available
-            )
-            .map(
-              (slot) =>
-                slot.time
-            ),
+        availableSlots: slots
+          .filter(
+            (slot) => slot.available
+          )
+          .map(
+            (slot) => slot.time
+          ),
       });
     } catch (err) {
       console.error(
@@ -505,9 +582,9 @@ app.get(
   }
 );
 
-// ==================================================
-// CREATE APPOINTMENT
-// ==================================================
+// --------------------------------------------------
+// APPOINTMENTS — CREATE
+// --------------------------------------------------
 
 app.post(
   "/api/appointments",
@@ -541,10 +618,6 @@ app.post(
       });
     }
 
-    // ----------------------------------------------
-    // DOCTOR
-    // ----------------------------------------------
-
     const selectedDoctor =
       getDoctorByName(
         String(doctor).trim()
@@ -558,20 +631,14 @@ app.post(
     }
 
     // ----------------------------------------------
-    // PHONE
+    // PHONE VALIDATION
     // ----------------------------------------------
 
-    const cleanPhone =
-      String(phone).replace(
-        /\D/g,
-        ""
-      );
+    const cleanPhone = String(
+      phone
+    ).replace(/\D/g, "");
 
-    if (
-      !/^\d{10}$/.test(
-        cleanPhone
-      )
-    ) {
+    if (!/^\d{10}$/.test(cleanPhone)) {
       return res.status(400).json({
         error:
           "Please provide a valid 10-digit phone number.",
@@ -579,16 +646,36 @@ app.post(
     }
 
     // ----------------------------------------------
-    // DATE
+    // EMAIL VALIDATION
     // ----------------------------------------------
 
-    const today =
-      getTodayIndia();
+    let cleanEmail = null;
+
+    if (email) {
+      cleanEmail = String(email)
+        .trim()
+        .toLowerCase();
+
+      if (
+        !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(
+          cleanEmail
+        )
+      ) {
+        return res.status(400).json({
+          error:
+            "Please provide a valid email address.",
+        });
+      }
+    }
+
+    // ----------------------------------------------
+    // DATE VALIDATION
+    // ----------------------------------------------
+
+    const today = getTodayIndia();
 
     if (
-      !/^\d{4}-\d{2}-\d{2}$/.test(
-        date
-      )
+      !/^\d{4}-\d{2}-\d{2}$/.test(date)
     ) {
       return res.status(400).json({
         error:
@@ -604,16 +691,14 @@ app.post(
     }
 
     // ----------------------------------------------
-    // TIME
+    // TIME VALIDATION
     // ----------------------------------------------
 
     const requestedMinutes =
       timeToMinutes(time);
 
     const closeMinutes =
-      timeToMinutes(
-        CLOSE_TIME
-      );
+      timeToMinutes(CLOSE_TIME);
 
     if (
       requestedMinutes === null ||
@@ -633,13 +718,12 @@ app.post(
       )
     ) {
       return res.status(400).json({
-        error:
-          `Appointments for ${selectedDoctor.name} are available in 30-minute slots between ${selectedDoctor.startTime} and ${selectedDoctor.endTime}.`,
+        error: `Appointments for ${selectedDoctor.name} are available in 30-minute slots between ${selectedDoctor.startTime} and ${selectedDoctor.endTime}.`,
       });
     }
 
     // ----------------------------------------------
-    // TODAY'S PAST TIME
+    // TODAY — PREVENT PAST TIME
     // ----------------------------------------------
 
     if (date === today) {
@@ -647,8 +731,7 @@ app.post(
         new Intl.DateTimeFormat(
           "en-GB",
           {
-            timeZone:
-              "Asia/Kolkata",
+            timeZone: "Asia/Kolkata",
             hour: "2-digit",
             minute: "2-digit",
             hour12: false,
@@ -656,9 +739,7 @@ app.post(
         ).format(new Date());
 
       const currentMinutes =
-        timeToMinutes(
-          indiaTime
-        );
+        timeToMinutes(indiaTime);
 
       if (
         currentMinutes !== null &&
@@ -672,10 +753,15 @@ app.post(
       }
     }
 
+    // ----------------------------------------------
+    // SAVE APPOINTMENT
+    // ----------------------------------------------
+
     try {
-      // --------------------------------------------
-      // QUICK DOUBLE-BOOKING CHECK
-      // --------------------------------------------
+      // Fast user-friendly check before INSERT.
+      //
+      // The unique database index remains the final
+      // protection against race conditions.
 
       const existing =
         await pool.query(
@@ -704,9 +790,8 @@ app.post(
         });
       }
 
-      // --------------------------------------------
-      // INSERT
-      // --------------------------------------------
+      // Return the complete appointment because
+      // email notifications need patient details.
 
       const result =
         await pool.query(
@@ -733,47 +818,277 @@ app.post(
               $7,
               $8
             )
-          RETURNING
-            id,
-            status,
-            doctor,
-            appt_date,
-            appt_time
+          RETURNING *
           `,
           [
             String(name).trim(),
             cleanPhone,
-
-            email
-              ? String(email).trim()
-              : null,
-
-            String(
-              service
-            ).trim(),
-
+            cleanEmail,
+            String(service).trim(),
             selectedDoctor.name,
-
             date,
             time,
-
             notes
-              ? String(
-                  notes
-                ).trim()
+              ? String(notes).trim()
               : null,
           ]
         );
 
-      res.status(201).json(
-        result.rows[0]
-      );
-    } catch (err) {
-      // PostgreSQL unique violation.
+      const appointment =
+        result.rows[0];
+
+      // --------------------------------------------
+      // ADMIN EMAIL
+      // --------------------------------------------
+
       if (
-        err?.code ===
-        "23505"
+        ADMIN_NOTIFICATION_EMAIL
       ) {
+        await sendEmail({
+          to:
+            ADMIN_NOTIFICATION_EMAIL,
+
+          subject:
+            `New Dental Appointment — ${appointment.name}`,
+
+          html: `
+            <div style="
+              font-family:Arial,sans-serif;
+              max-width:650px;
+              margin:auto;
+              padding:24px;
+              color:#222;
+            ">
+
+              <h2 style="
+                margin-bottom:8px;
+              ">
+                New Appointment Request
+              </h2>
+
+              <p>
+                A new appointment has been
+                booked through the hospital website.
+              </p>
+
+              <div style="
+                background:#f7f7f7;
+                padding:20px;
+                border-radius:10px;
+                margin:20px 0;
+              ">
+
+                <p>
+                  <strong>Patient:</strong>
+                  ${escapeHtml(
+                    appointment.name
+                  )}
+                </p>
+
+                <p>
+                  <strong>Phone:</strong>
+                  ${escapeHtml(
+                    appointment.phone
+                  )}
+                </p>
+
+                <p>
+                  <strong>Email:</strong>
+                  ${escapeHtml(
+                    appointment.email ||
+                      "Not provided"
+                  )}
+                </p>
+
+                <p>
+                  <strong>Service:</strong>
+                  ${escapeHtml(
+                    appointment.service
+                  )}
+                </p>
+
+                <p>
+                  <strong>Doctor:</strong>
+                  ${escapeHtml(
+                    appointment.doctor
+                  )}
+                </p>
+
+                <p>
+                  <strong>Date:</strong>
+                  ${escapeHtml(
+                    appointment.appt_date
+                  )}
+                </p>
+
+                <p>
+                  <strong>Time:</strong>
+                  ${escapeHtml(
+                    appointment.appt_time
+                  )}
+                </p>
+
+                <p>
+                  <strong>Notes:</strong>
+                  ${escapeHtml(
+                    appointment.notes ||
+                      "None"
+                  )}
+                </p>
+
+                <p>
+                  <strong>Status:</strong>
+                  Pending
+                </p>
+
+              </div>
+
+              <p>
+                Please open the admin dashboard
+                to confirm or decline this appointment.
+              </p>
+
+              <p>
+                <strong>
+                  Dr. Chandu's Multi-speciality Dental Hospital
+                </strong>
+              </p>
+
+            </div>
+          `,
+        });
+      }
+
+      // --------------------------------------------
+      // CUSTOMER ACKNOWLEDGEMENT EMAIL
+      // --------------------------------------------
+      //
+      // This email tells the patient that their
+      // request was received and is pending confirmation.
+
+      if (appointment.email) {
+        await sendEmail({
+          to: appointment.email,
+
+          subject:
+            "Appointment Request Received — Dr. Chandu's Dental Hospital",
+
+          html: `
+            <div style="
+              font-family:Arial,sans-serif;
+              max-width:650px;
+              margin:auto;
+              padding:24px;
+              color:#222;
+            ">
+
+              <h2>
+                Appointment Request Received
+              </h2>
+
+              <p>
+                Dear ${escapeHtml(
+                  appointment.name
+                )},
+              </p>
+
+              <p>
+                Thank you for requesting an
+                appointment with Dr. Chandu's
+                Multi-speciality Dental Hospital.
+              </p>
+
+              <p>
+                Your appointment request has been
+                received and is currently
+                <strong>pending confirmation</strong>.
+              </p>
+
+              <div style="
+                background:#f7f7f7;
+                padding:20px;
+                border-radius:10px;
+                margin:20px 0;
+              ">
+
+                <p>
+                  <strong>Doctor:</strong>
+                  ${escapeHtml(
+                    appointment.doctor
+                  )}
+                </p>
+
+                <p>
+                  <strong>Service:</strong>
+                  ${escapeHtml(
+                    appointment.service
+                  )}
+                </p>
+
+                <p>
+                  <strong>Date:</strong>
+                  ${escapeHtml(
+                    appointment.appt_date
+                  )}
+                </p>
+
+                <p>
+                  <strong>Time:</strong>
+                  ${escapeHtml(
+                    appointment.appt_time
+                  )}
+                </p>
+
+                <p>
+                  <strong>Status:</strong>
+                  Pending
+                </p>
+
+              </div>
+
+              <p>
+                We will confirm your appointment
+                after the hospital team reviews
+                the request.
+              </p>
+
+              <p>
+                For assistance, please call
+                <strong>090522 09930</strong>.
+              </p>
+
+              <p>
+                Regards,<br>
+                <strong>
+                  Dr. Chandu's Multi-speciality Dental Hospital
+                </strong>
+              </p>
+
+            </div>
+          `,
+        });
+      }
+
+      // --------------------------------------------
+      // RESPONSE
+      // --------------------------------------------
+
+      res.status(201).json({
+        id: appointment.id,
+        status: appointment.status,
+        doctor: appointment.doctor,
+        appt_date:
+          appointment.appt_date,
+        appt_time:
+          appointment.appt_time,
+      });
+
+    } catch (err) {
+
+      // PostgreSQL unique violation means
+      // another request won the same slot.
+
+      if (err?.code === "23505") {
         return res.status(409).json({
           error:
             "That appointment slot was just booked. Please choose another time.",
@@ -793,24 +1108,18 @@ app.post(
   }
 );
 
-// ==================================================
+// --------------------------------------------------
 // CHECK APPOINTMENT STATUS
-// ==================================================
+// --------------------------------------------------
 
 app.get(
   "/api/appointments/status",
   async (req, res) => {
-    const phone =
-      String(
-        req.query.phone || ""
-      ).replace(
-        /\D/g,
-        ""
-      );
+    const phone = String(
+      req.query.phone || ""
+    ).replace(/\D/g, "");
 
-    if (
-      !/^\d{10}$/.test(phone)
-    ) {
+    if (!/^\d{10}$/.test(phone)) {
       return res.status(400).json({
         error:
           "Please provide a valid 10-digit phone number.",
@@ -839,6 +1148,7 @@ app.get(
         appointments:
           result.rows,
       });
+
     } catch (err) {
       console.error(
         "Status lookup error:",
@@ -853,9 +1163,9 @@ app.get(
   }
 );
 
-// ==================================================
+// --------------------------------------------------
 // ADMIN — LIST APPOINTMENTS
-// ==================================================
+// --------------------------------------------------
 
 app.get(
   "/api/appointments",
@@ -874,6 +1184,7 @@ app.get(
         appointments:
           result.rows,
       });
+
     } catch (err) {
       console.error(
         "Admin appointment lookup error:",
@@ -888,14 +1199,15 @@ app.get(
   }
 );
 
-// ==================================================
+// --------------------------------------------------
 // ADMIN — UPDATE STATUS
-// ==================================================
+// --------------------------------------------------
 
 app.patch(
   "/api/appointments/:id",
   requireAdmin,
   async (req, res) => {
+
     const { status } =
       req.body || {};
 
@@ -918,22 +1230,260 @@ app.patch(
     }
 
     try {
-      await pool.query(
-        `
-        UPDATE appointments
-        SET status = $1
-        WHERE id = $2
-        `,
-        [
-          status,
-          req.params.id,
-        ]
-      );
+
+      // --------------------------------------------
+      // UPDATE + RETURN COMPLETE APPOINTMENT
+      // --------------------------------------------
+
+      const result =
+        await pool.query(
+          `
+          UPDATE appointments
+          SET status = $1
+          WHERE id = $2
+          RETURNING *
+          `,
+          [
+            status,
+            req.params.id,
+          ]
+        );
+
+      const appointment =
+        result.rows[0];
+
+      if (!appointment) {
+        return res.status(404).json({
+          error:
+            "Appointment not found.",
+        });
+      }
+
+      // --------------------------------------------
+      // CUSTOMER CONFIRMATION EMAIL
+      // --------------------------------------------
+
+      if (
+        status === "confirmed" &&
+        appointment.email
+      ) {
+
+        await sendEmail({
+          to: appointment.email,
+
+          subject:
+            "Appointment Confirmed — Dr. Chandu's Dental Hospital",
+
+          html: `
+            <div style="
+              font-family:Arial,sans-serif;
+              max-width:650px;
+              margin:auto;
+              padding:24px;
+              color:#222;
+            ">
+
+              <h2>
+                Appointment Confirmed
+              </h2>
+
+              <p>
+                Dear ${escapeHtml(
+                  appointment.name
+                )},
+              </p>
+
+              <p>
+                Your dental appointment has
+                been successfully confirmed.
+              </p>
+
+              <div style="
+                background:#f7f7f7;
+                padding:20px;
+                border-radius:10px;
+                margin:20px 0;
+              ">
+
+                <p>
+                  <strong>Doctor:</strong>
+                  ${escapeHtml(
+                    appointment.doctor
+                  )}
+                </p>
+
+                <p>
+                  <strong>Service:</strong>
+                  ${escapeHtml(
+                    appointment.service
+                  )}
+                </p>
+
+                <p>
+                  <strong>Date:</strong>
+                  ${escapeHtml(
+                    appointment.appt_date
+                  )}
+                </p>
+
+                <p>
+                  <strong>Time:</strong>
+                  ${escapeHtml(
+                    appointment.appt_time
+                  )}
+                </p>
+
+                <p>
+                  <strong>Status:</strong>
+                  Confirmed
+                </p>
+
+              </div>
+
+              <p>
+                Please arrive a few minutes
+                before your appointment time.
+              </p>
+
+              <p>
+                If you need any assistance,
+                please contact us at
+                <strong>090522 09930</strong>.
+              </p>
+
+              <p>
+                Regards,<br>
+                <strong>
+                  Dr. Chandu's Multi-speciality Dental Hospital
+                </strong>
+              </p>
+
+            </div>
+          `,
+        });
+      }
+
+      // --------------------------------------------
+      // CUSTOMER DECLINE EMAIL
+      // --------------------------------------------
+
+      if (
+        status === "declined" &&
+        appointment.email
+      ) {
+
+        await sendEmail({
+          to: appointment.email,
+
+          subject:
+            "Appointment Update — Dr. Chandu's Dental Hospital",
+
+          html: `
+            <div style="
+              font-family:Arial,sans-serif;
+              max-width:650px;
+              margin:auto;
+              padding:24px;
+              color:#222;
+            ">
+
+              <h2>
+                Appointment Update
+              </h2>
+
+              <p>
+                Dear ${escapeHtml(
+                  appointment.name
+                )},
+              </p>
+
+              <p>
+                We are sorry to inform you
+                that your requested appointment
+                could not be confirmed for the
+                selected time.
+              </p>
+
+              <div style="
+                background:#f7f7f7;
+                padding:20px;
+                border-radius:10px;
+                margin:20px 0;
+              ">
+
+                <p>
+                  <strong>Doctor:</strong>
+                  ${escapeHtml(
+                    appointment.doctor
+                  )}
+                </p>
+
+                <p>
+                  <strong>Service:</strong>
+                  ${escapeHtml(
+                    appointment.service
+                  )}
+                </p>
+
+                <p>
+                  <strong>Date:</strong>
+                  ${escapeHtml(
+                    appointment.appt_date
+                  )}
+                </p>
+
+                <p>
+                  <strong>Time:</strong>
+                  ${escapeHtml(
+                    appointment.appt_time
+                  )}
+                </p>
+
+                <p>
+                  <strong>Status:</strong>
+                  Declined
+                </p>
+
+              </div>
+
+              <p>
+                Please contact us at
+                <strong>090522 09930</strong>
+                to discuss another available
+                appointment time.
+              </p>
+
+              <p>
+                Regards,<br>
+                <strong>
+                  Dr. Chandu's Multi-speciality Dental Hospital
+                </strong>
+              </p>
+
+            </div>
+          `,
+        });
+      }
+
+      // --------------------------------------------
+      // ADMIN RESPONSE
+      // --------------------------------------------
 
       res.json({
         ok: true,
+        appointment: {
+          id: appointment.id,
+          status: appointment.status,
+          doctor: appointment.doctor,
+          appt_date:
+            appointment.appt_date,
+          appt_time:
+            appointment.appt_time,
+        },
       });
+
     } catch (err) {
+
       console.error(
         "Appointment status update error:",
         err
@@ -948,7 +1498,7 @@ app.patch(
 );
 
 // ==================================================
-// DOCTORS
+// CHATBOT KNOWLEDGE BASE
 // ==================================================
 
 const DOCTORS = [
@@ -962,10 +1512,8 @@ const DOCTORS = [
     qualification: "BDS",
     focus:
       "General Dentistry & Oral Care",
-
     startTime: "10:00",
     endTime: "19:30",
-
     workingDays: [
       0,
       1,
@@ -975,10 +1523,8 @@ const DOCTORS = [
       5,
       6,
     ],
-
     image:
       "https://placehold.co/600x600/f5f1e8/0f3028?text=Dr.+Chandu+Reddy",
-
     demo: true,
   },
 
@@ -993,10 +1539,8 @@ const DOCTORS = [
       "BDS, MDS Orthodontics",
     focus:
       "Braces & Clear Aligners",
-
     startTime: "10:00",
     endTime: "19:30",
-
     workingDays: [
       0,
       1,
@@ -1006,10 +1550,8 @@ const DOCTORS = [
       5,
       6,
     ],
-
     image:
       "https://placehold.co/600x600/f5f1e8/0f3028?text=Dr.+Priya+Sharma",
-
     demo: true,
   },
 
@@ -1024,10 +1566,8 @@ const DOCTORS = [
       "BDS, MDS Endodontics",
     focus:
       "Root Canal Treatment",
-
     startTime: "10:00",
     endTime: "19:30",
-
     workingDays: [
       0,
       1,
@@ -1037,10 +1577,8 @@ const DOCTORS = [
       5,
       6,
     ],
-
     image:
       "https://placehold.co/600x600/f5f1e8/0f3028?text=Dr.+Arjun+Mehta",
-
     demo: true,
   },
 
@@ -1055,10 +1593,8 @@ const DOCTORS = [
       "BDS, MDS Periodontics",
     focus:
       "Gum Care & Dental Implants",
-
     startTime: "10:00",
     endTime: "19:30",
-
     workingDays: [
       0,
       1,
@@ -1068,17 +1604,15 @@ const DOCTORS = [
       5,
       6,
     ],
-
     image:
       "https://placehold.co/600x600/f5f1e8/0f3028?text=Dr.+Sneha+Iyer",
-
     demo: true,
   },
 ];
 
-// ==================================================
-// HOSPITAL KNOWLEDGE BASE
-// ==================================================
+// --------------------------------------------------
+// KNOWLEDGE BASE
+// --------------------------------------------------
 
 const KB = [
   {
@@ -1157,7 +1691,7 @@ const KB = [
     ],
 
     text:
-      "The website currently uses temporary demo doctor profiles for development: Dr. Chandu Reddy — Chief Dental Surgeon, General Dentistry & Oral Care; Dr. Priya Sharma — Orthodontist, Braces & Clear Aligners; Dr. Arjun Mehta — Endodontist, Root Canal Treatment; Dr. Sneha Iyer — Periodontist, Gum Care & Dental Implants. These profiles are placeholders and must be replaced or verified by the hospital before public use.",
+      `The website currently uses temporary demo doctor profiles for development: Dr. Chandu Reddy — Chief Dental Surgeon, General Dentistry & Oral Care; Dr. Priya Sharma — Orthodontist, Braces & Clear Aligners; Dr. Arjun Mehta — Endodontist, Root Canal Treatment; Dr. Sneha Iyer — Periodontist, Gum Care & Dental Implants. These profiles are placeholders and must be replaced or verified by the hospital before public use.`,
   },
 
   {
@@ -1641,43 +2175,35 @@ const KB = [
   },
 ];
 
-// ==================================================
-// RAG RETRIEVAL
-// ==================================================
+// --------------------------------------------------
+// IMPROVED RETRIEVAL
+// --------------------------------------------------
 
 function retrieve(
   query,
   topK = 3
 ) {
-  const q =
-    normalizeText(query);
+  const q = normalizeText(query);
 
-  const qWords =
-    new Set(
-      q
-        .split(" ")
-        .filter(
-          (word) =>
-            word.length >= 3
-        )
-    );
+  const qWords = new Set(
+    q
+      .split(" ")
+      .filter(
+        (word) => word.length >= 3
+      )
+  );
 
-  const scored =
-    KB.map((chunk) => {
+  const scored = KB.map(
+    (chunk) => {
       let score = 0;
 
       // --------------------------------------------
-      // KEYWORD MATCHING
+      // EXACT KEYWORD MATCHING
       // --------------------------------------------
 
-      for (
-        const keyword
-        of chunk.keywords
-      ) {
+      for (const keyword of chunk.keywords) {
         const normalizedKeyword =
-          normalizeText(
-            keyword
-          );
+          normalizeText(keyword);
 
         if (
           q.includes(
@@ -1692,7 +2218,8 @@ function retrieve(
               : 2;
         }
 
-        // Singular/plural-friendly
+        // Singular/plural-friendly matching
+
         const words =
           normalizedKeyword.split(
             " "
@@ -1716,8 +2243,8 @@ function retrieve(
       // --------------------------------------------
 
       for (
-        const alias
-        of chunk.aliases || []
+        const alias of
+          chunk.aliases || []
       ) {
         const normalizedAlias =
           normalizeText(alias);
@@ -1748,10 +2275,7 @@ function retrieve(
       const uniqueTextWords =
         new Set(textWords);
 
-      for (
-        const word
-        of qWords
-      ) {
+      for (const word of qWords) {
         if (
           uniqueTextWords.has(
             word
@@ -1765,7 +2289,8 @@ function retrieve(
         chunk,
         score,
       };
-    });
+    }
+  );
 
   scored.sort(
     (a, b) =>
@@ -1784,9 +2309,9 @@ function retrieve(
     );
 }
 
-// ==================================================
-// GROQ RAG ANSWER
-// ==================================================
+// --------------------------------------------------
+// GROQ ANSWER
+// --------------------------------------------------
 
 async function askGroq(
   userQuery,
@@ -1804,53 +2329,32 @@ async function askGroq(
 You are Dr. Chandu AI, the virtual assistant for
 Dr. Chandu's Multi-speciality Dental Hospital.
 
-Your job is to answer questions using ONLY the
-hospital information supplied below.
+Answer the user's question briefly, naturally and warmly.
 
 IMPORTANT RULES:
 
-1. Use ONLY the provided hospital knowledge.
+1. Use ONLY the hospital information supplied in the context.
 
-2. Do NOT invent:
-   - prices
-   - services
-   - doctors
-   - timings
-   - appointment availability
-   - treatment details
-   - guarantees
-   - hospital policies
+2. Do NOT invent prices, services, timings, doctors,
+   treatments, guarantees, availability, or medical instructions.
 
-3. Do NOT diagnose the patient.
-
-4. Do NOT tell a patient that a treatment is
-   definitely suitable for them.
-
-5. If the answer is not available in the supplied
-   hospital knowledge, say:
-
+3. If the context does not contain the answer, clearly say:
    "I don't have that information right now."
+   Then provide the hospital phone number 090522 09930.
 
-   Then say:
+4. Do not pretend to diagnose the patient.
 
-   "Please call 090522 09930 and our team can help."
+5. For urgent or severe dental symptoms, encourage contacting
+   the hospital directly.
 
-6. For severe pain, swelling, trauma, bleeding,
-   fever, or another potentially urgent dental
-   problem, encourage the user to contact the
-   hospital directly.
+6. Keep the answer concise and easy to understand.
 
-7. Keep responses concise, friendly and easy
-   to understand.
-
-8. Do not mention RAG, retrieval, the knowledge
-   base, Groq, API, system prompt, or AI model.
-
-9. Never invent an answer just to satisfy the user.
-
-10. Use Indian English where natural.
+7. If the user asks a general question that is not about the
+   hospital's documented information, say that you don't have
+   that information rather than guessing.
 
 Hospital knowledge:
+
 ${context}
 `;
 
@@ -1877,8 +2381,7 @@ ${context}
 
           temperature: 0.2,
 
-          max_completion_tokens:
-            600,
+          max_completion_tokens: 600,
         }
       );
 
@@ -1893,7 +2396,9 @@ ${context}
       text ||
       "I don't have that information right now. Please call 090522 09930 and our team can help."
     );
+
   } catch (err) {
+
     console.error(
       "========== GROQ ERROR =========="
     );
@@ -1924,7 +2429,7 @@ ${context}
     );
 
     console.error(
-      "================================"
+      "================================="
     );
 
     return (
@@ -1933,9 +2438,9 @@ ${context}
   }
 }
 
-// ==================================================
+// --------------------------------------------------
 // INTENT DETECTION
-// ==================================================
+// --------------------------------------------------
 
 function detectIntent(query) {
   const q =
@@ -2123,8 +2628,7 @@ function detectIntent(query) {
           q.includes(pattern)
       )
     ) {
-      service =
-        serviceName;
+      service = serviceName;
       break;
     }
   }
@@ -2135,13 +2639,14 @@ function detectIntent(query) {
   };
 }
 
-// ==================================================
+// --------------------------------------------------
 // CHATBOT
-// ==================================================
+// --------------------------------------------------
 
 app.post(
   "/api/rag-chat",
   async (req, res) => {
+
     const userQuery =
       String(
         req.body?.query || ""
@@ -2155,6 +2660,7 @@ app.post(
     }
 
     try {
+
       // --------------------------------------------
       // APPOINTMENT STATUS
       // --------------------------------------------
@@ -2173,6 +2679,7 @@ app.post(
         asksStatus ||
         phoneMatch
       ) {
+
         if (!phoneMatch) {
           return res.json({
             text:
@@ -2196,14 +2703,11 @@ app.post(
             ORDER BY created_at DESC
             LIMIT 3
             `,
-            [
-              phoneMatch[0],
-            ]
+            [phoneMatch[0]]
           );
 
         if (
-          result.rows.length ===
-          0
+          result.rows.length === 0
         ) {
           return res.json({
             text:
@@ -2221,14 +2725,10 @@ app.post(
         const text =
           result.rows
             .map(
-              (row) => {
-                const date =
-                  new Date(
-                    row.appt_date
-                  ).toDateString();
-
-                return `${row.service} with ${row.doctor || "the dental team"} on ${date} at ${row.appt_time} is ${row.status}.`;
-              }
+              (row) =>
+                `${row.service} with ${row.doctor} on ${new Date(
+                  row.appt_date
+                ).toDateString()} at ${row.appt_time} is ${row.status}.`
             )
             .join(" ");
 
@@ -2243,22 +2743,17 @@ app.post(
       // --------------------------------------------
 
       const contextChunks =
-        retrieve(
-          userQuery
-        );
+        retrieve(userQuery);
 
       const intent =
-        detectIntent(
-          userQuery
-        );
+        detectIntent(userQuery);
 
       // --------------------------------------------
-      // NO RELEVANT KNOWLEDGE
+      // NO RELEVANT INFORMATION
       // --------------------------------------------
 
       if (
-        contextChunks.length ===
-        0
+        contextChunks.length === 0
       ) {
         return res.json({
           text:
@@ -2281,7 +2776,7 @@ app.post(
       }
 
       // --------------------------------------------
-      // GROQ RAG
+      // GROQ
       // --------------------------------------------
 
       const text =
@@ -2289,10 +2784,6 @@ app.post(
           userQuery,
           contextChunks
         );
-
-      // --------------------------------------------
-      // BOOKING ACTION
-      // --------------------------------------------
 
       const action =
         intent.wantsBooking ||
@@ -2312,7 +2803,9 @@ app.post(
         text,
         action,
       });
+
     } catch (err) {
+
       console.error(
         "Chatbot error:",
         err
@@ -2326,18 +2819,20 @@ app.post(
   }
 );
 
-// ==================================================
+// --------------------------------------------------
 // START SERVER
-// ==================================================
+// --------------------------------------------------
 
 const PORT =
   process.env.PORT || 3000;
 
 initDb()
   .then(() => {
+
     app.listen(
       PORT,
       () => {
+
         console.log(
           `API running on port ${PORT}`
         );
@@ -2351,16 +2846,18 @@ initDb()
         );
 
         console.log(
-          "AI provider: Groq"
-        );
-
-        console.log(
-          "RAG chatbot: enabled"
+          `Email notifications: ${
+            resend
+              ? "enabled"
+              : "disabled"
+          }`
         );
       }
     );
+
   })
   .catch((err) => {
+
     console.error(
       "Database initialization failed:",
       err
