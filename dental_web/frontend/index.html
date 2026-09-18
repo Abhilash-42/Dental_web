@@ -159,6 +159,23 @@
   }
   .svc-list button.svc-ask:hover{background:var(--coral);border-color:var(--coral);color:#fff;}
 
+
+  /* ===== Doctors / Specialists ===== */
+  .doctors{background:var(--ivory);border-bottom:1px solid var(--line);}
+  .doctor-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:18px;}
+  .doctor-card{background:var(--card-bg);border:1px solid var(--line);border-radius:14px;overflow:hidden;box-shadow:var(--shadow);display:flex;flex-direction:column;transition:transform .18s ease,box-shadow .18s ease;}
+  .doctor-card:hover{transform:translateY(-3px);box-shadow:0 12px 28px rgba(19,44,38,0.10);}
+  .doctor-photo{aspect-ratio:1/1;overflow:hidden;background:var(--ivory-2);}
+  .doctor-photo img{width:100%;height:100%;object-fit:cover;}
+  .doctor-body{padding:18px;display:flex;flex-direction:column;flex:1;}
+  .doctor-body h3{font-size:1.12rem;margin-bottom:4px;}
+  .doctor-role{color:var(--sage-deep);font-size:.83rem;font-weight:700;margin-bottom:8px;}
+  .doctor-focus{font-size:.84rem;color:var(--ink-soft);margin-bottom:8px;}
+  .doctor-meta{font-size:.78rem;color:var(--ink-soft);margin-bottom:14px;}
+  .doctor-demo{display:inline-flex;align-self:flex-start;background:#FBF3E4;color:#9A7311;border:1px solid #E8D39A;border-radius:100px;padding:3px 8px;font-size:.68rem;font-weight:700;margin-bottom:12px;}
+  .doctor-card .btn{margin-top:auto;width:100%;justify-content:center;padding:10px 14px;font-size:.84rem;}
+  .doctor-note{font-size:.78rem;color:var(--ink-soft);margin-top:18px;}
+
   /* ===== Reviews ===== */
   .review-quotes{display:grid;grid-template-columns:repeat(3,1fr);gap:0;border-top:1px solid var(--line);}
   .quote{padding:32px 30px;border-right:1px solid var(--line);}
@@ -331,6 +348,17 @@
   .chat-input-row button:hover{background:var(--pine-soft);}
   .chat-input-row button svg{width:17px;height:17px;}
 
+
+  /* ===== Booking validation / feedback ===== */
+  .field-error{display:none;margin-top:6px;color:var(--coral-deep);font-size:0.78rem;}
+  .field.invalid input,.field.invalid select,.field.invalid textarea{
+    border-color:var(--coral-deep);
+    box-shadow:0 0 0 2px rgba(207,92,57,0.08);
+  }
+  .field.invalid .field-error{display:block;}
+  #bookingHint{margin-top:8px;color:var(--ink-soft);font-size:0.78rem;}
+  #bookingForm .btn:disabled{opacity:.65;cursor:not-allowed;}
+
   /* ===== Responsive ===== */
   @media (max-width: 880px){
     nav.links{display:none;}
@@ -340,8 +368,10 @@
     .stat-rail .stat{border-bottom:none;padding:0;flex:1 1 40%;}
     .svc-groups{grid-template-columns:1fr;}
     .svc-group{border-right:none;border-bottom:1px solid rgba(237,231,216,0.18);}
+    .doctor-grid{grid-template-columns:repeat(2,1fr);}
     .review-quotes{grid-template-columns:1fr;}
     .quote{border-right:none;border-bottom:1px solid var(--line);}
+    .doctor-grid{grid-template-columns:1fr;}
     .booking-grid{grid-template-columns:1fr;}
     .form-row{grid-template-columns:1fr;}
     #chatPanel{right:16px;bottom:16px;width:calc(100vw - 32px);}
@@ -362,6 +392,7 @@
     <nav class="links">
       <a href="#overview">Overview</a>
       <a href="#services">Services</a>
+      <a href="#doctors">Our Doctors</a>
       <a href="#reviews">Reviews</a>
       <a href="#booking" class="btn btn-primary" style="padding:10px 20px;">Book Now</a>
     </nav>
@@ -423,6 +454,70 @@
     </div>
   </section>
 
+  <section class="doctors" id="doctors">
+    <div class="wrap">
+      <div class="section-head">
+        <div>
+          <h2>Meet our dental specialists</h2>
+          <p class="section-sub">Our dental team brings focused expertise across general, orthodontic, endodontic and gum care. Doctor profiles below are temporary demo profiles for development.</p>
+        </div>
+        <a href="#booking" class="btn btn-ghost">Choose a doctor</a>
+      </div>
+    </div>
+    <div class="wrap" style="padding:0 28px;">
+      <div class="doctor-grid" id="doctorGrid">
+        <article class="doctor-card">
+          <div class="doctor-photo"><img src="https://randomuser.me/api/portraits/men/32.jpg" alt="Dr. Chandu Reddy" loading="lazy"></div>
+          <div class="doctor-body">
+            <span class="doctor-demo">DEMO PROFILE</span>
+            <h3>Dr. Chandu Reddy</h3>
+            <div class="doctor-role">Chief Dental Surgeon</div>
+            <div class="doctor-focus">General Dentistry &amp; Oral Care</div>
+            <div class="doctor-meta">BDS · 10+ Years Experience</div>
+            <button class="btn btn-primary doctor-book" data-doctor="Dr. Chandu Reddy">Book with Dr. Chandu</button>
+          </div>
+        </article>
+
+        <article class="doctor-card">
+          <div class="doctor-photo"><img src="https://randomuser.me/api/portraits/women/44.jpg" alt="Dr. Priya Sharma" loading="lazy"></div>
+          <div class="doctor-body">
+            <span class="doctor-demo">DEMO PROFILE</span>
+            <h3>Dr. Priya Sharma</h3>
+            <div class="doctor-role">Orthodontist</div>
+            <div class="doctor-focus">Braces &amp; Clear Aligners</div>
+            <div class="doctor-meta">BDS, MDS Orthodontics · 8+ Years Experience</div>
+            <button class="btn btn-primary doctor-book" data-doctor="Dr. Priya Sharma">Book with Dr. Priya</button>
+          </div>
+        </article>
+
+        <article class="doctor-card">
+          <div class="doctor-photo"><img src="https://randomuser.me/api/portraits/men/46.jpg" alt="Dr. Arjun Mehta" loading="lazy"></div>
+          <div class="doctor-body">
+            <span class="doctor-demo">DEMO PROFILE</span>
+            <h3>Dr. Arjun Mehta</h3>
+            <div class="doctor-role">Endodontist</div>
+            <div class="doctor-focus">Root Canal Treatment</div>
+            <div class="doctor-meta">BDS, MDS Endodontics · 9+ Years Experience</div>
+            <button class="btn btn-primary doctor-book" data-doctor="Dr. Arjun Mehta">Book with Dr. Arjun</button>
+          </div>
+        </article>
+
+        <article class="doctor-card">
+          <div class="doctor-photo"><img src="https://randomuser.me/api/portraits/women/65.jpg" alt="Dr. Sneha Iyer" loading="lazy"></div>
+          <div class="doctor-body">
+            <span class="doctor-demo">DEMO PROFILE</span>
+            <h3>Dr. Sneha Iyer</h3>
+            <div class="doctor-role">Periodontist</div>
+            <div class="doctor-focus">Gum Care &amp; Dental Implants</div>
+            <div class="doctor-meta">BDS, MDS Periodontics · 7+ Years Experience</div>
+            <button class="btn btn-primary doctor-book" data-doctor="Dr. Sneha Iyer">Book with Dr. Sneha</button>
+          </div>
+        </article>
+      </div>
+      <p class="doctor-note">Note: These names, qualifications, experience details and photographs are temporary demo content. Replace them with verified hospital staff information before publishing publicly.</p>
+    </div>
+  </section>
+
   <section id="reviews">
     <div class="wrap">
       <div class="section-head">
@@ -454,7 +549,7 @@
     <div class="wrap booking-grid">
       <div class="booking-info">
         <h2>Book your appointment</h2>
-        <p>Open daily until 8:00 PM. Choose a service and time that works, and our team will confirm by phone.</p>
+        <p>Open daily from 10:00 AM to 7:30 PM. Choose a service, doctor and time that works, and our team will confirm by phone.</p>
         <div class="info-line">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 21s-7-6.1-7-11a7 7 0 0114 0c0 4.9-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg>
           <span>1st floor, V complex, near Sri Chaitanya School, Sunkara Palem, Andhra Pradesh 533464</span>
@@ -465,24 +560,38 @@
         </div>
         <div class="info-line">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
-          <span>Open daily · until 8:00 PM</span>
+          <span>Open daily · 10:00 AM – 7:30 PM</span>
         </div>
       </div>
       <form id="bookingForm">
-        <div class="field">
-          <label for="svcSelect">Service</label>
-          <select id="svcSelect" required>
-            <option value="">Select a service</option>
-          </select>
-        </div>
         <div class="form-row">
           <div class="field">
-            <label for="apptDate">Date</label>
-            <input type="date" id="apptDate" required>
+            <label for="svcSelect">Service</label>
+            <select id="svcSelect" required>
+              <option value="">Select a service</option>
+            </select>
           </div>
           <div class="field">
+            <label for="doctorSelect">Doctor <span style="font-weight:400;color:var(--ink-soft);">(optional)</span></label>
+            <select id="doctorSelect">
+              <option value="">Any available doctor</option>
+              <option value="Dr. Chandu Reddy">Dr. Chandu Reddy</option>
+              <option value="Dr. Priya Sharma">Dr. Priya Sharma</option>
+              <option value="Dr. Arjun Mehta">Dr. Arjun Mehta</option>
+              <option value="Dr. Sneha Iyer">Dr. Sneha Iyer</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="field" id="dateField">
+            <label for="apptDate">Date</label>
+            <input type="date" id="apptDate" required>
+            <div class="field-error" id="dateError"></div>
+          </div>
+          <div class="field" id="timeField">
             <label for="apptTime">Time</label>
-            <input type="time" id="apptTime" required>
+            <input type="time" id="apptTime" min="10:00" max="19:30" required>
+            <div class="field-error" id="timeError"></div>
           </div>
         </div>
         <div class="form-row">
@@ -502,6 +611,7 @@
         <div class="field">
           <label for="pNotes">Notes for the doctor</label>
           <textarea id="pNotes" placeholder="Anything we should know before your visit"></textarea>
+          <div id="bookingHint">Appointments can be requested between 10:00 AM and 7:30 PM.</div>
         </div>
         <div class="submit-row">
           <button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;">Request appointment</button>
@@ -592,7 +702,7 @@ async function apiFetch(path, options = {}) {
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || `Request failed (${res.status})`);
+    throw new Error(body.error || body.message || `Request failed (${res.status})`);
   }
   return res.json();
 }
@@ -630,6 +740,7 @@ renderServiceList('svc-surgical', SERVICES.surgical);
 
 // Populate booking form dropdown from the same source of truth
 const svcSelect = document.getElementById('svcSelect');
+const doctorSelect = document.getElementById('doctorSelect');
 Object.values(SERVICES).flat().forEach(name => {
   const opt = document.createElement('option');
   opt.value = name; opt.textContent = name;
@@ -638,8 +749,8 @@ Object.values(SERVICES).flat().forEach(name => {
 
 /* =========================================================
    RAG CHAT — now a thin client
-   The knowledge base, retrieval, and the actual Claude call all
-   live server-side in /backend/server.js (see askClaude() and
+   The knowledge base, retrieval, and the actual Gemini call all
+   live server-side in /backend/server.js (see askGemini() and
    the KB array there). This just calls that API.
    ========================================================= */
 async function queryRAGEngine(userQuery){
@@ -710,10 +821,14 @@ function addActionButton(action){
   chatMessages.scrollTop = chatMessages.scrollHeight;
 }
 
-function prefillAndScrollToBooking(serviceName){
+function prefillAndScrollToBooking(serviceName, doctorName){
   if (serviceName){
     const opt = Array.from(svcSelect.options).find(o => o.value === serviceName);
     if (opt) svcSelect.value = serviceName;
+  }
+  if (doctorName && doctorSelect){
+    const doctorOpt = Array.from(doctorSelect.options).find(o => o.value === doctorName);
+    if (doctorOpt) doctorSelect.value = doctorName;
   }
   closeChat();
   document.getElementById('booking').scrollIntoView({ behavior: 'smooth' });
@@ -744,63 +859,223 @@ document.getElementById('quickChips').addEventListener('click', (e) => {
 });
 
 /* =========================================================
+   DOCTOR BOOKING BUTTONS
+   ========================================================= */
+document.querySelectorAll('.doctor-book').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const doctorName = btn.dataset.doctor || '';
+    if (doctorSelect) doctorSelect.value = doctorName;
+    closeChat();
+    document.getElementById('booking').scrollIntoView({ behavior:'smooth' });
+    setTimeout(() => {
+      if (doctorSelect) doctorSelect.focus({ preventScroll:true });
+    }, 500);
+  });
+});
+
+/* =========================================================
    BOOKING FORM
    ========================================================= */
-document.getElementById('bookingForm').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const submitBtn = e.target.querySelector('button[type="submit"]');
-  const service = svcSelect.value;
-  const date = document.getElementById('apptDate').value;
-  const time = document.getElementById('apptTime').value;
-  const name = document.getElementById('pName').value;
-  const phone = document.getElementById('pPhone').value;
-  const email = document.getElementById('pEmail').value;
-  const notes = document.getElementById('pNotes').value;
+const bookingForm = document.getElementById('bookingForm');
+const apptDate = document.getElementById('apptDate');
+const apptTime = document.getElementById('apptTime');
+const pName = document.getElementById('pName');
+const pPhone = document.getElementById('pPhone');
+const pEmail = document.getElementById('pEmail');
+const pNotes = document.getElementById('pNotes');
+const bookingDoctor = document.getElementById('doctorSelect');
+const dateField = document.getElementById('dateField');
+const timeField = document.getElementById('timeField');
+const dateError = document.getElementById('dateError');
+const timeError = document.getElementById('timeError');
 
+function getLocalDateISO(){
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+}
+
+function setDateMinimum(){
+  const today = getLocalDateISO();
+  apptDate.min = today;
+  if (apptDate.value && apptDate.value < today) apptDate.value = '';
+}
+
+function clearFieldError(field, errorEl){
+  field.classList.remove('invalid');
+  errorEl.textContent = '';
+}
+
+function setFieldError(field, errorEl, message){
+  field.classList.add('invalid');
+  errorEl.textContent = message;
+}
+
+function validateAppointmentDateTime(showErrors = true){
+  let valid = true;
+  const today = getLocalDateISO();
+
+  if (!apptDate.value){
+    if (showErrors) setFieldError(dateField, dateError, 'Please choose an appointment date.');
+    valid = false;
+  } else if (apptDate.value < today){
+    if (showErrors) setFieldError(dateField, dateError, 'Past dates cannot be booked. Please choose today or a future date.');
+    valid = false;
+  } else if (showErrors){
+    clearFieldError(dateField, dateError);
+  }
+
+  if (!apptTime.value){
+    if (showErrors) setFieldError(timeField, timeError, 'Please choose an appointment time.');
+    valid = false;
+  } else {
+    const time = apptTime.value;
+
+    if (time < '10:00' || time > '19:30'){
+      if (showErrors) setFieldError(timeField, timeError, 'Please choose a time between 10:00 AM and 7:30 PM.');
+      valid = false;
+    } else if (apptDate.value === today){
+      const now = new Date();
+      const currentMinutes = now.getHours() * 60 + now.getMinutes();
+      const [hours, minutes] = time.split(':').map(Number);
+      const selectedMinutes = hours * 60 + minutes;
+
+      if (selectedMinutes < currentMinutes){
+        if (showErrors) setFieldError(timeField, timeError, 'That time has already passed today. Please choose a later time.');
+        valid = false;
+      } else if (showErrors){
+        clearFieldError(timeField, timeError);
+      }
+    } else if (showErrors){
+      clearFieldError(timeField, timeError);
+    }
+  }
+
+  return valid;
+}
+
+setDateMinimum();
+setInterval(setDateMinimum, 60000);
+
+apptDate.addEventListener('change', () => {
+  clearFieldError(dateField, dateError);
+  clearFieldError(timeField, timeError);
+  validateAppointmentDateTime(true);
+});
+
+apptTime.addEventListener('change', () => {
+  clearFieldError(timeField, timeError);
+  validateAppointmentDateTime(true);
+});
+
+bookingForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+
+  setDateMinimum();
+
+  const service = svcSelect.value;
+  const doctor = bookingDoctor ? bookingDoctor.value : '';
+  const date = apptDate.value;
+  const time = apptTime.value;
+  const name = pName.value.trim();
+  const phone = pPhone.value.replace(/\D/g, '');
+  const email = pEmail.value.trim();
+  const notes = pNotes.value.trim();
+
+  pPhone.value = phone;
+
+  let valid = validateAppointmentDateTime(true);
+
+  if (!service){
+    svcSelect.closest('.field').classList.add('invalid');
+    valid = false;
+  } else {
+    svcSelect.closest('.field').classList.remove('invalid');
+  }
+
+  if (!name){
+    pName.closest('.field').classList.add('invalid');
+    valid = false;
+  } else {
+    pName.closest('.field').classList.remove('invalid');
+  }
+
+  if (!/^\d{10}$/.test(phone)){
+    pPhone.closest('.field').classList.add('invalid');
+    valid = false;
+  } else {
+    pPhone.closest('.field').classList.remove('invalid');
+  }
+
+  if (!valid){
+    const firstInvalid = bookingForm.querySelector('.field.invalid');
+    if (firstInvalid) firstInvalid.scrollIntoView({behavior:'smooth', block:'center'});
+    return;
+  }
+
+  const submitBtn = bookingForm.querySelector('button[type="submit"]');
   const box = document.getElementById('confirmBox');
-  const readableDate = date ? new Date(date + 'T00:00:00').toLocaleDateString('en-IN', { weekday:'long', year:'numeric', month:'long', day:'numeric' }) : '';
+  const readableDate = new Date(date + 'T00:00:00').toLocaleDateString('en-IN', {
+    weekday:'long', year:'numeric', month:'long', day:'numeric'
+  });
 
   submitBtn.disabled = true;
   submitBtn.textContent = 'Sending request…';
+  box.classList.remove('show', 'pending');
 
-  let saved = false;
   try {
     await apiFetch('/api/appointments', {
       method: 'POST',
-      body: JSON.stringify({ name, phone, email, service, date, time, notes })
+      body: JSON.stringify({ name, phone, email, service, doctor, date, time, notes })
     });
-    saved = true;
+
+    box.classList.add('show', 'pending');
+    document.getElementById('confirmText').innerHTML =
+      `<strong>${escapeHtml(name)}</strong>, your request for <strong>${escapeHtml(service)}</strong>` +
+      `${doctor ? ` with <strong>${escapeHtml(doctor)}</strong>` : ''} on ` +
+      `<strong>${escapeHtml(readableDate)}</strong> at <strong>${escapeHtml(time)}</strong> is ` +
+      `<strong>pending confirmation</strong>.<br>` +
+      `Our front desk will review it and call <strong>${escapeHtml(phone)}</strong> once it is accepted. ` +
+      `You can also ask the chat assistant to check your appointment status.`;
+
+    bookingForm.reset();
+    setDateMinimum();
+    apptTime.min = '10:00';
+    apptTime.max = '19:30';
+
   } catch (err) {
-    saved = false;
-  }
-
-  submitBtn.disabled = false;
-  submitBtn.textContent = 'Request appointment';
-
-  box.classList.remove('pending');
-  box.classList.add('show');
-  if (saved){
-    box.classList.add('pending');
+    box.classList.add('show');
     document.getElementById('confirmText').innerHTML =
-      `<strong>${name}</strong>, your request for <strong>${service}</strong> on <strong>${readableDate}</strong> at <strong>${time}</strong> is <strong>pending confirmation</strong>.<br>Our front desk reviews it from the admin panel and will call ${phone} once it's accepted. You can also ask the chat assistant to check its status any time using your phone number.`;
-  } else {
-    document.getElementById('confirmText').innerHTML =
-      `<strong>${name}</strong>, we couldn't reach our booking system just now. Please call <strong>090522 09930</strong> directly and we'll get you in for <strong>${service}</strong> on <strong>${readableDate}</strong> at <strong>${time}</strong>.`;
+      `We couldn't save your request right now. Please call <strong>090522 09930</strong> directly ` +
+      `for <strong>${escapeHtml(service)}</strong> on <strong>${escapeHtml(readableDate)}</strong> at ` +
+      `<strong>${escapeHtml(time)}</strong>.`;
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Request appointment';
+    box.scrollIntoView({behavior:'smooth', block:'nearest'});
   }
-  box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+});
+
+[pName, pPhone, svcSelect].forEach(el => {
+  el.addEventListener('input', () => el.closest('.field')?.classList.remove('invalid'));
+  el.addEventListener('change', () => el.closest('.field')?.classList.remove('invalid'));
 });
 
 /* =========================================================
    ADMIN PANEL — accept / decline / complete requests
-   Talks to the protected /api/appointments endpoints using an
-   admin key entered once and kept in sessionStorage. Refreshes
-   on open and every 10s while open (swap for WebSockets/Socket.io
-   later if you want true real-time push).
    ========================================================= */
 const adminOverlay = document.getElementById('adminOverlay');
 const adminList = document.getElementById('adminList');
 const adminDbNote = document.getElementById('adminDbNote');
 let adminPollTimer = null;
+
+function escapeHtml(value){
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
 
 function statusLabel(s){
   return { pending:'Pending', confirmed:'Confirmed', declined:'Declined', completed:'Completed' }[s] || 'Pending';
@@ -828,11 +1103,11 @@ function renderAppointments(rows){
     card.className = 'appt-card';
     card.innerHTML = `
       <div class="appt-main">
-        <div class="appt-name">${a.name || 'Unnamed patient'} <span class="status-tag ${a.status || 'pending'}">${statusLabel(a.status)}</span></div>
+        <div class="appt-name">${escapeHtml(a.name || 'Unnamed patient')} <span class="status-tag ${escapeHtml(a.status || 'pending')}">${escapeHtml(statusLabel(a.status))}</span></div>
         <div class="appt-meta">
-          ${a.service || 'Service not specified'} · ${readableDate} at ${a.appt_time || '—'}<br>
-          ${a.phone || '—'}${a.email ? ' · ' + a.email : ''}
-          ${a.notes ? '<br>Notes: ' + a.notes : ''}
+          ${escapeHtml(a.service || 'Service not specified')} ${a.doctor ? '· ' + escapeHtml(a.doctor) : '· Any available doctor'} · ${escapeHtml(readableDate)} at ${escapeHtml(a.appt_time || '—')}<br>
+          ${escapeHtml(a.phone || '—')}${a.email ? ' · ' + escapeHtml(a.email) : ''}
+          ${a.notes ? '<br>Notes: ' + escapeHtml(a.notes) : ''}
         </div>
       </div>
       <div class="appt-actions"></div>
@@ -921,6 +1196,11 @@ document.getElementById('navToggle').addEventListener('click', () => {
   links.style.padding = '20px 28px';
   links.style.borderBottom = '1px solid var(--line)';
   links.style.gap = '18px';
+  if (!isShown){
+    links.querySelectorAll('a').forEach(link => {
+      link.addEventListener('click', () => { links.style.display = 'none'; }, { once:true });
+    });
+  }
 });
 </script>
 </body>
