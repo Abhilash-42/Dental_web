@@ -758,7 +758,13 @@ ${userQuery}
       "I don't have that information right now. Please call 090522 09930 and our team can help."
     );
   } catch (err) {
-    console.error("Gemini error:", err);
+  console.error("========== GEMINI ERROR ==========");
+console.error("Name:", err?.name);
+console.error("Message:", err?.message);
+console.error("Status:", err?.status);
+console.error("Code:", err?.code);
+console.error("Full error:", err);
+console.error("===================================");
 
     return (
       "I'm having trouble answering right now. Please call 090522 09930 and our team can help."
