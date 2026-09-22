@@ -46,10 +46,23 @@ function escapeHtml(value){
     .replace(/'/g,'&#039;');
 }
 
+function normalizeAppointmentDate(value){
+  if(!value) return '';
+
+  return String(value).split('T')[0];
+}
+
 function formatDate(dateString){
-  if(!dateString) return '—';
-  const date = new Date(`${dateString}T12:00:00`);
-  if(Number.isNaN(date.getTime())) return dateString;
+  const normalized = normalizeAppointmentDate(dateString);
+
+  if(!normalized) return '—';
+
+  const date = new Date(`${normalized}T12:00:00`);
+
+  if(Number.isNaN(date.getTime())){
+    return normalized;
+  }
+
   return date.toLocaleDateString('en-IN', {
     weekday:'short',
     year:'numeric',
@@ -113,7 +126,12 @@ function getFilteredAppointments(){
   return allAppointments.filter(a => {
     if(status !== 'all' && (a.status || 'pending') !== status) return false;
     if(doctor !== 'all' && (a.doctor || '') !== doctor) return false;
-    if(date && a.appt_date !== date) return false;
+    if(
+       date &&
+       normalizeAppointmentDate(a.appt_date) !== date
+     ){
+       return false;
+       }
 
     if(search){
       const haystack = [
